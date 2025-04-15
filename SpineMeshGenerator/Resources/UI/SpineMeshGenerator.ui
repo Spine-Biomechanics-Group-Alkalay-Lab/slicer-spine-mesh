@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>452</width>
-    <height>721</height>
+    <height>800</height> <!-- Increased height for new controls -->
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -246,6 +246,109 @@
      </layout>
     </widget>
    </item>
+   <!-- New Clipping Section -->
+   <item>
+    <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
+     <property name="text">
+      <string>Mesh Clipping</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_4">
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <item>
+         <widget class="QLabel" name="label_9">
+          <property name="text">
+           <string>Select Mesh:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="qMRMLNodeComboBox" name="modelSelector">
+          <property name="toolTip">
+           <string>Select mesh to clip</string>
+          </property>
+          <property name="nodeTypes">
+           <stringlist>
+            <string>vtkMRMLModelNode</string>
+           </stringlist>
+          </property>
+          <property name="showChildNodeTypes">
+           <bool>false</bool>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="enableClippingButton">
+        <property name="toolTip">
+         <string>Enable/disable mesh clipping to inspect the internal structure</string>
+        </property>
+        <property name="text">
+         <string>Enable Clipping</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QGroupBox" name="clippingControlsGroupBox">
+        <property name="title">
+         <string>Clipping Controls</string>
+        </property>
+        <layout class="QFormLayout" name="formLayout_5">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_10">
+           <property name="text">
+            <string>Clipping Direction:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="clipDirectionComboBox">
+           <property name="toolTip">
+            <string>Select the clipping plane orientation</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_11">
+           <property name="text">
+            <string>Clip Position:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="ctkSliderWidget" name="clipSliderWidget">
+           <property name="toolTip">
+            <string>Adjust the position of the clipping plane</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0" colspan="2">
+          <widget class="QCheckBox" name="flipClipCheckBox">
+           <property name="toolTip">
+            <string>Flip which side of the model is clipped</string>
+           </property>
+           <property name="text">
+            <string>Flip Clipping Direction</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <!-- End of New Clipping Section -->
    <item>
     <widget class="QPushButton" name="applyButton">
      <property name="toolTip">
@@ -282,6 +385,11 @@
    <class>ctkDirectoryButton</class>
    <extends>QWidget</extends>
    <header>ctkDirectoryButton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>

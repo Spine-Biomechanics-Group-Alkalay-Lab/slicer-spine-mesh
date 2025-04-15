@@ -70,6 +70,8 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self._parameterNode = None
         self._updatingGUIFromParameterNode = False
         self.segmentSelectionDict = {}  # Store segment selection info
+        self.clippingEnabled = False
+        self.clippingNode = None
 
     def setup(self):
         """Called when the widget is initialized."""
@@ -102,6 +104,13 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         # Connect Apply button
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
 
+        # Connect clipping controls (new)
+        self.ui.enableClippingButton.connect("clicked(bool)", self.onEnableClippingButtonClicked)
+        self.ui.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onModelSelected)
+        self.ui.clipDirectionComboBox.connect("currentIndexChanged(int)", self.updateClippingDirection)
+        self.ui.clipSliderWidget.connect("valueChanged(double)", self.updateClippingPosition)
+        self.ui.flipClipCheckBox.connect("toggled(bool)", self.updateClippingFlip)
+
         # Setup input volume selector properties
         self.ui.inputVolumeSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
         self.ui.inputVolumeSelector.addEnabled = False
@@ -112,6 +121,13 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.inputVolumeSelector.selectNodeUponCreation = True
         self.ui.inputVolumeSelector.setMRMLScene(slicer.mrmlScene)
         
+        # Setup model selector properties (new)
+        self.ui.modelSelector.nodeTypes = ["vtkMRMLModelNode"]
+        self.ui.modelSelector.addEnabled = False
+        self.ui.modelSelector.removeEnabled = False
+        self.ui.modelSelector.noneEnabled = True
+        self.ui.modelSelector.setMRMLScene(slicer.mrmlScene)
+        
         # Setup output format options
         self.ui.outputFormatComboBox.clear()
         self.ui.outputFormatComboBox.addItem("All Formats", "all")
@@ -121,11 +137,21 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.outputFormatComboBox.addItem("GMSH", "msh")
         self.ui.outputFormatComboBox.addItem("Summit", "summit")
         
+        # Setup clip direction options (new)
+        self.ui.clipDirectionComboBox.clear()
+        self.ui.clipDirectionComboBox.addItem("Axial (X-Y)", 0)
+        self.ui.clipDirectionComboBox.addItem("Sagittal (Y-Z)", 1)
+        self.ui.clipDirectionComboBox.addItem("Coronal (X-Z)", 2)
+        self.ui.clipDirectionComboBox.setCurrentIndex(0)  # Default to Axial
+        
         # Update target edge length default to match config (1.37mm)
         self.ui.targetEdgeLengthSpinBox.setValue(1.37)
         
         # Hide material mapping options initially
         self.ui.materialMappingGroupBox.setVisible(False)
+        
+        # Hide clipping controls initially (new)
+        self.ui.clippingControlsGroupBox.setVisible(False)
         
         # Initialize parameter node
         self.initializeParameterNode()
@@ -227,9 +253,165 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
     def onMaterialMappingToggled(self, enabled):
         self.ui.materialMappingGroupBox.setVisible(enabled)
         self.updateParameterNodeFromGUI()
+        
+    # New methods for clipping feature
+    def onEnableClippingButtonClicked(self):
+        """Toggle clipping on/off"""
+        self.clippingEnabled = not self.clippingEnabled
+        self.ui.clippingControlsGroupBox.setVisible(self.clippingEnabled)
+        
+        if self.clippingEnabled:
+            self.ui.enableClippingButton.setText("Disable Clipping")
+            modelNode = self.ui.modelSelector.currentNode()
+            if modelNode:
+                self.setupClippingForModel(modelNode)
+        else:
+            self.ui.enableClippingButton.setText("Enable Clipping")
+            self.disableClipping()
+            
+    def onModelSelected(self, modelNode):
+        """Handle selection of a model for clipping"""
+        if self.clippingEnabled and modelNode:
+            # Disable clipping on previous model if there was one
+            self.disableClipping()
+            # Set up clipping for the newly selected model
+            self.setupClippingForModel(modelNode)
+        elif self.clippingEnabled and not modelNode:
+            self.disableClipping()
+            
+    def setupClippingForModel(self, modelNode):
+        """Set up clipping for the selected model"""
+        if not modelNode:
+            return
+            
+        # Clean up any existing clipping node
+        self.disableClipping()
+        
+        # Create a new clipping node
+        self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
+        self.clippingNode.SetScene(slicer.mrmlScene)
+        
+        # Get model bounds
+        bounds = [0, 0, 0, 0, 0, 0]
+        modelNode.GetBounds(bounds)
+        
+        # Set initial clipping parameters
+        clipDirection = self.ui.clipDirectionComboBox.currentIndex
+        self.clippingNode.SetClipType(clipDirection)
+        self.clippingNode.SetRedSliceClipState(1)  # 1 = positive side (keep)
+        self.clippingNode.SetYellowSliceClipState(1)
+        self.clippingNode.SetGreenSliceClipState(1)
+        
+        # Initialize slice positions based on model bounds
+        sliceLogic = slicer.app.layoutManager().sliceWidget("Red").sliceLogic()
+        sliceNode = sliceLogic.GetSliceNode()
+        sliceOffset = (bounds[1] + bounds[0]) / 2  # Middle of model
+        sliceNode.SetSliceOffset(sliceOffset)
+        
+        # Set slider range to model bounds
+        if clipDirection == 0:  # Axial (Red slice - Z axis)
+            self.ui.clipSliderWidget.minimum = bounds[4]  # Z min
+            self.ui.clipSliderWidget.maximum = bounds[5]  # Z max
+            self.ui.clipSliderWidget.value = (bounds[4] + bounds[5]) / 2
+        elif clipDirection == 1:  # Sagittal (Yellow slice - X axis)
+            self.ui.clipSliderWidget.minimum = bounds[0]  # X min
+            self.ui.clipSliderWidget.maximum = bounds[1]  # X max
+            self.ui.clipSliderWidget.value = (bounds[0] + bounds[1]) / 2
+        else:  # Coronal (Green slice - Y axis)
+            self.ui.clipSliderWidget.minimum = bounds[2]  # Y min
+            self.ui.clipSliderWidget.maximum = bounds[3]  # Y max
+            self.ui.clipSliderWidget.value = (bounds[2] + bounds[3]) / 2
+        
+        # Set model visibility to clipping
+        displayNode = modelNode.GetDisplayNode()
+        if displayNode:
+            displayNode.SetClipping(1)
+            
+        # Enable clipping in Slicer
+        slicer.mrmlScene.AddNode(self.clippingNode)
+        
+        # Store reference to model for later use
+        self._parameterNode.SetNodeReferenceID("CurrentClippedModel", modelNode.GetID())
+        
+    def disableClipping(self):
+        """Disable and clean up clipping"""
+        if self.clippingNode:
+            slicer.mrmlScene.RemoveNode(self.clippingNode)
+            self.clippingNode = None
+            
+        # Disable clipping on the model's display node
+        modelNodeID = self._parameterNode.GetNodeReferenceID("CurrentClippedModel")
+        if modelNodeID:
+            modelNode = slicer.mrmlScene.GetNodeByID(modelNodeID)
+            if modelNode:
+                displayNode = modelNode.GetDisplayNode()
+                if displayNode:
+                    displayNode.SetClipping(0)
+            self._parameterNode.SetNodeReferenceID("CurrentClippedModel", "")
+            
+    def updateClippingDirection(self, index):
+        """Update the clipping direction based on combo box selection"""
+        if not self.clippingEnabled or not self.clippingNode:
+            return
+            
+        direction = index
+        self.clippingNode.SetClipType(direction)
+        
+        # Update slider range for the new direction
+        modelNode = self.ui.modelSelector.currentNode()
+        if modelNode:
+            bounds = [0, 0, 0, 0, 0, 0]
+            modelNode.GetBounds(bounds)
+            
+            if direction == 0:  # Axial
+                self.ui.clipSliderWidget.minimum = bounds[4]  # Z min
+                self.ui.clipSliderWidget.maximum = bounds[5]  # Z max
+                self.ui.clipSliderWidget.value = (bounds[4] + bounds[5]) / 2
+            elif direction == 1:  # Sagittal
+                self.ui.clipSliderWidget.minimum = bounds[0]  # X min
+                self.ui.clipSliderWidget.maximum = bounds[1]  # X max
+                self.ui.clipSliderWidget.value = (bounds[0] + bounds[1]) / 2
+            else:  # Coronal
+                self.ui.clipSliderWidget.minimum = bounds[2]  # Y min
+                self.ui.clipSliderWidget.maximum = bounds[3]  # Y max
+                self.ui.clipSliderWidget.value = (bounds[2] + bounds[3]) / 2
+                
+    def updateClippingPosition(self, position):
+        """Update the clipping position based on slider value"""
+        if not self.clippingEnabled or not self.clippingNode:
+            return
+            
+        direction = self.ui.clipDirectionComboBox.currentIndex
+        
+        # Update the slice position based on direction
+        layoutManager = slicer.app.layoutManager()
+        if direction == 0:  # Axial (Red slice)
+            sliceWidget = layoutManager.sliceWidget("Red")
+        elif direction == 1:  # Sagittal (Yellow slice)
+            sliceWidget = layoutManager.sliceWidget("Yellow")
+        else:  # Coronal (Green slice)
+            sliceWidget = layoutManager.sliceWidget("Green")
+            
+        if sliceWidget:
+            sliceLogic = sliceWidget.sliceLogic()
+            sliceNode = sliceLogic.GetSliceNode()
+            sliceNode.SetSliceOffset(position)
+        
+    def updateClippingFlip(self, flip):
+        """Flip the clipping direction"""
+        if not self.clippingEnabled or not self.clippingNode:
+            return
+            
+        clipState = 2 if flip else 1  # 1 = positive side, 2 = negative side
+        self.clippingNode.SetRedSliceClipState(clipState)
+        self.clippingNode.SetYellowSliceClipState(clipState)
+        self.clippingNode.SetGreenSliceClipState(clipState)
 
     def cleanup(self):
         self.removeObservers()
+        # Clean up clipping if enabled
+        if self.clippingEnabled:
+            self.disableClipping()
 
     def enter(self):
         self.initializeParameterNode()
@@ -297,6 +479,15 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.materialMappingGroupBox.setVisible(materialMapping)
         self.ui.slopeSpinBox.value = float(self._parameterNode.GetParameter("Slope") or 0.7)
         self.ui.interceptSpinBox.value = float(self._parameterNode.GetParameter("Intercept") or 5.1)
+        
+        # Update model selector with available models (new)
+        if not self.ui.modelSelector.currentNode():
+            # Try to find a volume mesh node to pre-select
+            volumeMeshNodes = slicer.util.getNodesByClass("vtkMRMLModelNode")
+            for node in volumeMeshNodes:
+                if "_volume_mesh" in node.GetName():
+                    self.ui.modelSelector.setCurrentNode(node)
+                    break
         
         # Check if we can apply
         canApply = (self._parameterNode.GetNodeReference("InputVolume") and 
@@ -389,6 +580,10 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
                 # Show a simplified status message with totals
                 volumeModels = [node for node in createdNodes if "volume_mesh" in node.GetName()]
                 statusMessage = f"Processing complete. {len(volumeModels)} volume meshes with {summary['totalElements']} elements generated."
+                
+                # Update model selector with newly created models
+                if volumeModels:
+                    self.ui.modelSelector.setCurrentNode(volumeModels[0])
             else:
                 statusMessage = "Processing complete. No meshes were loaded for display."
                 
@@ -435,7 +630,6 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         
         # Show the dialog
         meshStatsDialog.exec_()
-
 
 #
 # SpineMeshGeneratorLogic
