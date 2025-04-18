@@ -348,6 +348,61 @@
      </layout>
     </widget>
    </item>
+   <!-- New Quality Analysis Section -->
+<item>
+  <widget class="ctkCollapsibleButton" name="qualityAnalysisCollapsibleButton">
+    <property name="text">
+      <string>Mesh Quality Analysis</string>
+    </property>
+    <layout class="QVBoxLayout" name="verticalLayout_5">
+      <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_3">
+          <item>
+            <widget class="QLabel" name="label_12">
+              <property name="text">
+                <string>Select Mesh:</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="qMRMLNodeComboBox" name="qualityAnalysisMeshSelector">
+              <property name="toolTip">
+                <string>Select mesh to analyze</string>
+              </property>
+              <property name="nodeTypes">
+                <stringlist>
+                  <string>vtkMRMLModelNode</string>
+                </stringlist>
+              </property>
+              <property name="showChildNodeTypes">
+                <bool>false</bool>
+              </property>
+              <property name="noneEnabled">
+                <bool>true</bool>
+              </property>
+              <property name="addEnabled">
+                <bool>false</bool>
+              </property>
+              <property name="removeEnabled">
+                <bool>false</bool>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <widget class="QPushButton" name="analyzeQualityButton">
+          <property name="toolTip">
+            <string>Analyze mesh quality</string>
+          </property>
+          <property name="text">
+            <string>Analyze Quality</string>
+          </property>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+</item>
    <!-- End of New Clipping Section -->
    <item>
     <widget class="QPushButton" name="applyButton">

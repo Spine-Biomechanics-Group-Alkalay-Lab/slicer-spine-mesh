@@ -111,6 +111,14 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.clipSliderWidget.connect("valueChanged(double)", self.updateClippingPosition)
         self.ui.flipClipCheckBox.connect("toggled(bool)", self.updateClippingFlip)
 
+        # Setup quality analysis section
+        self.ui.qualityAnalysisMeshSelector.nodeTypes = ["vtkMRMLModelNode"]
+        self.ui.qualityAnalysisMeshSelector.addEnabled = False
+        self.ui.qualityAnalysisMeshSelector.removeEnabled = False
+        self.ui.qualityAnalysisMeshSelector.noneEnabled = True
+        self.ui.qualityAnalysisMeshSelector.setMRMLScene(slicer.mrmlScene)
+        self.ui.analyzeQualityButton.connect("clicked(bool)", self.onAnalyzeQualityButtonClicked)
+
         # Setup input volume selector properties
         self.ui.inputVolumeSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
         self.ui.inputVolumeSelector.addEnabled = False
@@ -166,6 +174,51 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.segmentsTableWidget.setHorizontalHeaderLabels(["Segment", "Include"])
         self.ui.segmentsTableWidget.horizontalHeader().setSectionResizeMode(0, qt.QHeaderView.Stretch)
         self.ui.segmentsTableWidget.horizontalHeader().setSectionResizeMode(1, qt.QHeaderView.ResizeToContents)
+
+    # Add these methods to the SpineMeshGeneratorWidget class
+    def onAnalyzeQualityButtonClicked(self):
+        """Analyze quality of the selected mesh"""
+        modelNode = self.ui.qualityAnalysisMeshSelector.currentNode()
+        if not modelNode:
+            slicer.util.errorDisplay("No mesh selected for quality analysis.")
+            return
+            
+        # Analyze quality using logic method
+        qualityResults = self.logic.analyzeMeshQuality(modelNode)
+        
+        # Display results in a dialog
+        self.showQualityResultsDialog(qualityResults, modelNode.GetName())
+        
+    def showQualityResultsDialog(self, qualityResults, meshName):
+        """
+        Show a dialog with mesh quality results
+        """
+        # Format the results message
+        messageText = f"<b>Mesh Quality Analysis: {meshName}</b><br><br>"
+        messageText += f"<b>Number of tetrahedral elements:</b> {qualityResults['num_elements']}<br>"
+        messageText += f"<b>Elements with aspect ratio > 5:</b> {qualityResults['poor_elements']} "
+        messageText += f"({qualityResults['poor_elements_percent']:.2f}%)<br>"
+        messageText += f"<b>Average aspect ratio:</b> {qualityResults['avg_aspect_ratio']:.3f}<br>"
+        messageText += f"<b>Worst aspect ratio:</b> {qualityResults['max_aspect_ratio']:.3f}<br>"
+        
+        # Create a dialog to display quality results
+        qualityDialog = qt.QDialog(slicer.util.mainWindow())
+        qualityDialog.setWindowTitle("Mesh Quality Analysis")
+        qualityDialog.setMinimumWidth(400)
+        
+        layout = qt.QVBoxLayout(qualityDialog)
+        
+        label = qt.QLabel(messageText)
+        label.setTextFormat(qt.Qt.RichText)
+        layout.addWidget(label)
+        
+        closeButton = qt.QPushButton("Close")
+        closeButton.setToolTip("Close this dialog")
+        closeButton.connect("clicked(bool)", qualityDialog.accept)
+        layout.addWidget(closeButton)
+        
+        # Show the dialog
+        qualityDialog.exec_()
 
     def updateSegmentTable(self):
         """Update the segment table with current segments from segmentation module."""
@@ -860,7 +913,92 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             
         # Return the created nodes and stats so they can be tracked
         return generatedVolumeNode, generatedSurfaceNode, meshStats
-    
+
+    def analyzeMeshQuality(self, modelNode):
+        """
+        Analyze the quality of a tetrahedral mesh
+        Returns a dictionary with quality metrics
+        """
+        import vtk
+        import numpy as np
+        
+        if not modelNode:
+            logging.error("No model node provided for quality analysis")
+            return None
+        
+        # Ensure we're working with an unstructured grid (volume mesh)
+        try:
+            # If model node, try to get mesh from it
+            mesh = modelNode.GetMesh()
+            if not mesh:
+                logging.error("Model node does not contain a mesh")
+                return None
+                
+            if not mesh.IsA("vtkUnstructuredGrid"):
+                # Try to convert to unstructured grid
+                grid = vtk.vtkUnstructuredGrid()
+                grid.SetPoints(mesh.GetPoints())
+                
+                # Check if we have tet cells (we need cell data)
+                hasTets = False
+                for i in range(mesh.GetNumberOfCells()):
+                    cell = mesh.GetCell(i)
+                    if cell.GetCellType() == vtk.VTK_TETRA:
+                        hasTets = True
+                        grid.InsertNextCell(vtk.VTK_TETRA, cell.GetPointIds())
+                
+                if not hasTets:
+                    logging.error("Mesh does not contain tetrahedral elements")
+                    return {"num_elements": 0, "poor_elements": 0, "poor_elements_percent": 0, 
+                            "avg_aspect_ratio": 0, "max_aspect_ratio": 0}
+                    
+                mesh = grid
+        except Exception as e:
+            logging.error(f"Error processing mesh: {str(e)}")
+            return None
+        
+        # Initialize quality metric calculator
+        qualityFilter = vtk.vtkMeshQuality()
+        qualityFilter.SetInputData(mesh)
+        qualityFilter.SetTetQualityMeasureToAspectRatio()
+        qualityFilter.Update()
+        
+        qualityArray = qualityFilter.GetOutput().GetCellData().GetArray("Quality")
+        if not qualityArray:
+            logging.error("Unable to compute quality metrics")
+            return None
+        
+        # Extract quality values
+        numElements = qualityArray.GetNumberOfTuples()
+        aspectRatios = [qualityArray.GetValue(i) for i in range(numElements)]
+        
+        # Calculate statistics
+        if numElements > 0:
+            avgAspectRatio = np.mean(aspectRatios)
+            maxAspectRatio = np.max(aspectRatios)
+            poorElements = sum(1 for ratio in aspectRatios if ratio > 5)
+            poorElementsPercent = (poorElements / numElements) * 100
+        else:
+            avgAspectRatio = 0
+            maxAspectRatio = 0
+            poorElements = 0
+            poorElementsPercent = 0
+        
+        # Return results
+        results = {
+            "num_elements": numElements,
+            "poor_elements": poorElements,
+            "poor_elements_percent": poorElementsPercent,
+            "avg_aspect_ratio": avgAspectRatio,
+            "max_aspect_ratio": maxAspectRatio
+        }
+        
+        logging.info(f"Mesh quality analysis completed. {numElements} elements analyzed.")
+        logging.info(f"Average aspect ratio: {avgAspectRatio:.3f}, Max: {maxAspectRatio:.3f}")
+        logging.info(f"Poor elements (ratio > 5): {poorElements} ({poorElementsPercent:.2f}%)")
+        
+        return results
+
     def calculateVolumeAndSurface(self, volumeNode, segmentationNode):
         """
         Calculate volume and surface area statistics for a segmentation.
