@@ -787,7 +787,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         return createdNodes, meshStatistics, summary
     
     def processSegment(self, inputVolumeNode, segmentationNode, segmentID, outputDirectory, 
-                       targetEdgeLength, outputFormat, enableMaterialMapping, materialParams):
+                   targetEdgeLength, outputFormat, enableMaterialMapping, materialParams):
         """
         Process a single segment following the workflow from the configuration.
         """
@@ -809,12 +809,6 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         segmentStats = self.calculateVolumeAndSurface(inputVolumeNode, tempSegmentationNode)
         logging.info(f"Computed Closed Surface Statistics: {segmentStats}")
         
-        # Calculate point-surface ratio and number of points (using DEFAULT_POINT_TO_SURFACE_RATIO from config = 1.62)
-        pointSurfaceRatio = 1.62  # Using fixed ratio from config
-        numberPoints = self.calculateSurfaceNumberPoints(segmentStats["SurfaceArea_mm2"], pointSurfaceRatio)
-        logging.info(f"Using point-surface ratio: {pointSurfaceRatio}")
-        logging.info(f"Target number of points: {numberPoints}")
-        
         # Build file paths
         paths = self.buildPaths(segmentOutputDir, segmentName)
         
@@ -827,6 +821,30 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             # Export segmentation to model
             modelNode = self.exportSegmentationToModel(tempSegmentationNode)
             
+            # ---------- ADD EDGE LENGTH OPTIMIZATION HERE ----------
+            # Run optimization to find optimal pointSurfaceRatio and GMSH size
+            optimizationResult = self.optimizeEdgeLength(
+                modelNode, 
+                segmentStats["SurfaceArea_mm2"],
+                targetEdgeLength, 
+                0.05,  # Use 5% tolerance as in original pipeline
+                20     # Max iterations
+            )
+            
+            if optimizationResult:
+                pointSurfaceRatio = optimizationResult['ratio']
+                gmshSize = optimizationResult['gmsh_size']
+                logging.info(f"Using optimized parameters: ratio={pointSurfaceRatio:.4f}, gmsh_size={gmshSize:.4f}mm")
+            else:
+                # Fallback to defaults if optimization fails
+                pointSurfaceRatio = 1.62  # Default from pipeline
+                gmshSize = targetEdgeLength
+                logging.info(f"Optimization failed, using defaults: ratio={pointSurfaceRatio}, gmsh_size={gmshSize}mm")
+                
+            # Calculate number of points based on optimized ratio
+            numberPoints = self.calculateSurfaceNumberPoints(segmentStats["SurfaceArea_mm2"], pointSurfaceRatio)
+            logging.info(f"Target number of points: {numberPoints}")
+            
             # Create uniform remesh with calculated number of points
             outputModelNode = self.createUniformRemesh(
                 modelNode, 
@@ -837,8 +855,8 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             slicer.util.saveNode(outputModelNode, paths["surface_mesh_path"])
             logging.info(f"Surface mesh saved to {paths['surface_mesh_path']}")
             
-            # Generate volume mesh with target edge length
-            volume_mesh_path = self.generateVolumeMesh(outputModelNode, paths, targetEdgeLength)
+            # Generate volume mesh with optimized GMSH size
+            volume_mesh_path = self.generateVolumeMesh(outputModelNode, paths, gmshSize)
             
             # Calculate material properties if enabled
             if enableMaterialMapping:
@@ -913,6 +931,440 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             
         # Return the created nodes and stats so they can be tracked
         return generatedVolumeNode, generatedSurfaceNode, meshStats
+
+    def optimizeEdgeLength(self, modelNode, surfaceArea, targetEdgeLength, tolerance=0.05, maxIterations=20):
+        """
+        Optimize edge length parameters to match the mesh automation pipeline.
+        
+        Args:
+            modelNode: The input model node to optimize
+            surfaceArea: Surface area in mm²
+            targetEdgeLength: Target average edge length in mm
+            tolerance: Acceptable tolerance as a fraction (default: 0.05 = 5%)
+            maxIterations: Maximum optimization iterations
+            
+        Returns:
+            Dictionary with optimization results or None if failed
+        """
+        try:
+            import numpy as np
+            import tempfile
+            import shutil
+            import meshio
+            import subprocess
+            
+            from scipy import optimize
+            
+            targetMin = targetEdgeLength * (1 - tolerance)
+            targetMax = targetEdgeLength * (1 + tolerance)
+            
+            logging.info(f"Optimizing mesh for edge length {targetEdgeLength}mm")
+            logging.info(f"Tolerance: ±{tolerance*100:.1f}% ({targetMin:.4f}mm to {targetMax:.4f}mm)")
+            
+            # Store evaluation results
+            surfaceEvaluations = []
+            bestModelNode = None
+            initialRatio = 1.62  # Default from pipeline
+            
+            def evaluateSurfaceEdgeLength(ratio):
+                """Evaluate surface mesh edge length for a given ratio"""
+                nonlocal bestModelNode, surfaceEvaluations
+                
+                # Calculate number of points
+                numberPoints = self.calculateSurfaceNumberPoints(surfaceArea, ratio)
+                
+                logging.info(f"Testing ratio = {ratio:.4f} ({numberPoints:.0f} points)")
+                
+                # Perform remeshing for surface
+                outputName = f"OptimizationOutput_{len(surfaceEvaluations)+1}"
+                outputModelNode = self.createUniformRemesh(
+                    modelNode,
+                    outputModelName=outputName,
+                    clusterK=round(numberPoints / 1000.0, 1),
+                )
+                
+                # Save temporary STL to measure edge length
+                tempDir = tempfile.mkdtemp()
+                tempStl = os.path.join(tempDir, "temp_surface.stl")
+                
+                slicer.util.saveNode(outputModelNode, tempStl)
+                
+                # Measure surface mesh edge length
+                try:
+                    surfaceMeshData = meshio.read(tempStl)
+                    surfaceEdgeLength = self.calculateAverageEdgeLengthSurface(surfaceMeshData)
+                except Exception as e:
+                    logging.error(f"Error measuring edge length: {str(e)}")
+                    # Clean up
+                    slicer.mrmlScene.RemoveNode(outputModelNode)
+                    shutil.rmtree(tempDir, ignore_errors=True)
+                    return float('inf')  # Return large error value
+                
+                # Store evaluation
+                surfaceEvaluations.append({
+                    'ratio': ratio,
+                    'edge_length': surfaceEdgeLength,
+                    'diff': abs(surfaceEdgeLength - targetEdgeLength),
+                    'number_of_points': numberPoints,
+                    'stl_path': tempStl
+                })
+                
+                logging.info(f"  → Surface edge length = {surfaceEdgeLength:.4f}mm (target: {targetEdgeLength:.4f}mm)")
+                
+                # Keep best model node 
+                if len(surfaceEvaluations) == 1 or abs(surfaceEdgeLength - targetEdgeLength) < surfaceEvaluations[-2]['diff']:
+                    if bestModelNode:
+                        slicer.mrmlScene.RemoveNode(bestModelNode)
+                    bestModelNode = outputModelNode
+                else:
+                    slicer.mrmlScene.RemoveNode(outputModelNode)
+                
+                return surfaceEdgeLength - targetEdgeLength
+            
+            # Define bounds for surface optimization
+            minRatio = max(0.1, initialRatio * 0.25)
+            maxRatio = min(20.0, initialRatio * 4.0)
+            
+            logging.info(f"Starting surface optimization with initial ratio = {initialRatio:.4f}")
+            
+            # --- SURFACE OPTIMIZATION ---
+            try:
+                # Try with initial ratio first
+                initialResult = evaluateSurfaceEdgeLength(initialRatio)
+                
+                # If within tolerance, we're done with surface optimization
+                if abs(initialResult) <= tolerance * targetEdgeLength:
+                    logging.info(f"Initial ratio {initialRatio:.4f} already within tolerance!")
+                    bestSurfaceEval = surfaceEvaluations[0]
+                else:
+                    # Need to optimize - bracket the solution
+                    if initialResult > 0:  # Edge length too large, need higher ratio
+                        bracket = [initialRatio, maxRatio]
+                    else:  # Edge length too small, need lower ratio
+                        bracket = [minRatio, initialRatio]
+                    
+                    # Use brentq for root finding
+                    try:
+                        result = optimize.brentq(
+                            evaluateSurfaceEdgeLength,
+                            bracket[0],
+                            bracket[1],
+                            xtol=tolerance * targetEdgeLength / 10,
+                            maxiter=maxIterations // 2,
+                            full_output=True
+                        )
+                        
+                        logging.info(f"Surface optimizer converged in {result[1].iterations} iterations")
+                    except Exception as e:
+                        logging.warning(f"Surface optimization did not fully converge: {e}")
+                        logging.info("Using best result found so far")
+                    
+                    # Get best surface eval
+                    bestSurfaceEval = min(surfaceEvaluations, key=lambda x: abs(x['edge_length'] - targetEdgeLength))
+                    
+                # Extract best surface results
+                bestRatio = bestSurfaceEval['ratio']
+                bestSurfaceEdgeLength = bestSurfaceEval['edge_length']
+                bestNumberOfPoints = bestSurfaceEval['number_of_points']
+                bestStlPath = bestSurfaceEval['stl_path']
+                
+                # Verify the STL file exists and is accessible
+                if not os.path.exists(bestStlPath) or os.path.getsize(bestStlPath) == 0:
+                    logging.warning(f"Best STL file not found or empty: {bestStlPath}")
+                    logging.info("Creating a new STL file from the best model...")
+                    
+                    # Create a new STL file in a temp directory
+                    tempDir = tempfile.mkdtemp()
+                    bestStlPath = os.path.join(tempDir, "best_surface.stl")
+                    slicer.util.saveNode(bestModelNode, bestStlPath)
+                    logging.info(f"Created new STL file: {bestStlPath}")
+                
+                logging.info(f"Best surface mesh: ratio={bestRatio:.4f}, edge_length={bestSurfaceEdgeLength:.4f}mm")
+                
+                # --- VOLUME OPTIMIZATION ---
+                # For volume optimization, we'll use the GMSH approach
+                bestGmshSize = targetEdgeLength  # Default to target edge length
+                bestVolumeEdgeLength = None
+                volumeWithinTolerance = False
+                
+                # Skip volume optimization if Python GMSH script is not available
+                scriptPath = os.path.dirname(os.path.abspath(__file__))
+                gmshScriptPath = os.path.join(scriptPath, "generate_mesh.py")
+                
+                if not os.path.exists(gmshScriptPath):
+                    self.createGmshScript(gmshScriptPath)
+                    
+                # Initial guess for GMSH size parameter - start with target edge length
+                initialGmshSize = targetEdgeLength
+                volumeEvaluations = []
+                bestVtkPath = None
+                
+                def evaluateVolumeEdgeLength(gmshSize):
+                    """Evaluate volume mesh edge length for a given GMSH size parameter"""
+                    nonlocal volumeEvaluations, bestVtkPath
+                    
+                    logging.info(f"Testing GMSH size = {gmshSize:.4f}mm")
+                    
+                    # Create temporary directory for volume mesh generation
+                    tempDir = tempfile.mkdtemp()
+                    tempStl = os.path.join(tempDir, "remesh_output.stl")
+                    tempMsh = os.path.join(tempDir, "volume_mesh.msh")
+                    tempVtk = os.path.join(tempDir, "volume_mesh.vtk")
+                    
+                    # Save STL to temp directory
+                    shutil.copy(bestStlPath, tempStl)
+                    
+                    try:
+                        # Build command for GMSH script
+                        pythonExec = sys.executable
+                        cmd = [pythonExec, gmshScriptPath, tempStl, tempMsh, str(gmshSize)]
+                        
+                        # Use clean environment
+                        cleanEnv = {
+                            k: v
+                            for k, v in os.environ.items()
+                            if k not in ["PYTHONHOME", "PYTHONPATH", "LD_LIBRARY_PATH"]
+                        }
+                        
+                        # Run with the clean environment
+                        subprocess.check_call(cmd, env=cleanEnv)
+                        logging.info(f"GMSH successfully generated mesh: {tempMsh}")
+                        
+                        # Verify the output mesh was created
+                        if not os.path.exists(tempMsh) or os.path.getsize(tempMsh) == 0:
+                            logging.warning(f"GMSH did not create a valid mesh file at {tempMsh}")
+                            return float('inf')  # Return large error value
+                        
+                        # Convert to VTK and measure edge length
+                        meshWithoutTriangles = self.removeMeshTriangles(tempMsh)
+                        meshio.write(tempVtk, meshWithoutTriangles)
+                        
+                        volumeMeshData = meshio.read(tempVtk)
+                        volumeEdgeLength = self.calculateAverageEdgeLengthVolume(volumeMeshData)
+                        
+                        # Store evaluation
+                        volumeEvaluations.append({
+                            'gmsh_size': gmshSize,
+                            'edge_length': volumeEdgeLength,
+                            'diff': abs(volumeEdgeLength - targetEdgeLength),
+                            'vtk_path': tempVtk
+                        })
+                        
+                        logging.info(f"  → Volume edge length = {volumeEdgeLength:.4f}mm (target: {targetEdgeLength:.4f}mm)")
+                        
+                        # Keep best VTK path
+                        if len(volumeEvaluations) == 1 or abs(volumeEdgeLength - targetEdgeLength) < volumeEvaluations[-2]['diff']:
+                            bestVtkPath = tempVtk
+                        
+                        return volumeEdgeLength - targetEdgeLength
+                        
+                    except subprocess.CalledProcessError as e:
+                        logging.error(f"Error running GMSH: {e}")
+                        return float('inf')
+                    except Exception as e:
+                        logging.error(f"Error generating volume mesh: {str(e)}")
+                        return float('inf')
+                
+                # Define bounds for volume optimization
+                minGmshSize = max(0.1, initialGmshSize * 0.5)
+                maxGmshSize = min(20.0, initialGmshSize * 2.0)
+                
+                # Try initial GMSH size
+                initialVolumeResult = evaluateVolumeEdgeLength(initialGmshSize)
+                
+                if volumeEvaluations:  # Check that we got at least one successful evaluation
+                    # If within tolerance, we're done
+                    if abs(initialVolumeResult) <= tolerance * targetEdgeLength:
+                        logging.info(f"Initial GMSH size {initialGmshSize:.4f}mm already within tolerance!")
+                        bestVolumeEval = volumeEvaluations[0]
+                    else:
+                        # Need to optimize - bracket the solution
+                        if initialVolumeResult > 0:  # Edge length too large, need smaller size
+                            bracket = [minGmshSize, initialGmshSize]
+                        else:  # Edge length too small, need larger size
+                            bracket = [initialGmshSize, maxGmshSize]
+                        
+                        # Use brentq for root finding
+                        try:
+                            result = optimize.brentq(
+                                evaluateVolumeEdgeLength,
+                                bracket[0],
+                                bracket[1],
+                                xtol=tolerance * targetEdgeLength / 10,
+                                maxiter=maxIterations // 2,
+                                full_output=True
+                            )
+                            
+                            logging.info(f"Volume optimizer converged in {result[1].iterations} iterations")
+                        except Exception as e:
+                            logging.warning(f"Volume optimization did not fully converge: {e}")
+                            logging.info("Using best result found so far")
+                        
+                        # Get best volume eval if we have any successful evaluations
+                        if volumeEvaluations:
+                            bestVolumeEval = min(volumeEvaluations, key=lambda x: abs(x['edge_length'] - targetEdgeLength))
+                            bestGmshSize = bestVolumeEval['gmsh_size']
+                            bestVolumeEdgeLength = bestVolumeEval['edge_length']
+                            volumeWithinTolerance = targetMin <= bestVolumeEdgeLength <= targetMax
+                        else:
+                            logging.info("No successful volume mesh evaluations. Using target as GMSH size.")
+                else:
+                    logging.warning("Volume optimization failed. Using target edge length as GMSH size.")
+            
+                # Print final results
+                logging.info("--- OPTIMIZATION RESULTS ---")
+                logging.info(f"Best surface mesh (ratio={bestRatio:.4f}):")
+                logging.info(f"  - Edge length: {bestSurfaceEdgeLength:.4f}mm")
+                logging.info(f"  - Target: {targetEdgeLength:.4f}mm")
+                logging.info(f"  - Difference: {abs(bestSurfaceEdgeLength - targetEdgeLength):.4f}mm")
+                
+                logging.info(f"Volume mesh (GMSH size={bestGmshSize:.4f}mm):")
+                if bestVolumeEdgeLength is not None:
+                    logging.info(f"  - Edge length: {bestVolumeEdgeLength:.4f}mm")
+                    logging.info(f"  - Difference: {abs(bestVolumeEdgeLength - targetEdgeLength):.4f}mm")
+                else:
+                    logging.info("  - Edge length: Unknown (GMSH optimization failed)")
+                    logging.info("  - Using target edge length as GMSH size")
+                
+                # Check if within tolerance
+                surfaceWithinTolerance = targetMin <= bestSurfaceEdgeLength <= targetMax
+                
+                if surfaceWithinTolerance and volumeWithinTolerance:
+                    logging.info("Both meshes achieved target edge length within tolerance!")
+                elif surfaceWithinTolerance:
+                    if bestVolumeEdgeLength is not None:
+                        logging.info("Surface mesh within tolerance, but volume mesh outside tolerance")
+                    else:
+                        logging.info("Surface mesh within tolerance (volume mesh not evaluated)")
+                elif volumeWithinTolerance:
+                    logging.info("Volume mesh within tolerance, but surface mesh outside tolerance")
+                else:
+                    if bestVolumeEdgeLength is not None:
+                        logging.info("Neither mesh achieved target edge length within tolerance")
+                    else:
+                        logging.info("Surface mesh outside tolerance (volume mesh not evaluated)")
+                
+                # Return optimization results
+                return {
+                    'ratio': bestRatio,
+                    'gmsh_size': bestGmshSize,
+                    'surface_edge_length': bestSurfaceEdgeLength,
+                    'volume_edge_length': bestVolumeEdgeLength,
+                    'number_of_points': bestNumberOfPoints,
+                    'model_node': bestModelNode,
+                    'surface_within_tolerance': surfaceWithinTolerance,
+                    'volume_within_tolerance': volumeWithinTolerance,
+                    'iterations': len(surfaceEvaluations) + len(volumeEvaluations)
+                }
+                
+            except Exception as e:
+                logging.error(f"Optimization error: {str(e)}")
+                logging.info("Falling back to best result found so far")
+                
+                if surfaceEvaluations:
+                    bestEval = min(surfaceEvaluations, key=lambda x: abs(x['edge_length'] - targetEdgeLength))
+                    
+                    # Return partial results
+                    return {
+                        'ratio': bestEval['ratio'],
+                        'gmsh_size': targetEdgeLength,  # Fallback to target
+                        'surface_edge_length': bestEval['edge_length'],
+                        'volume_edge_length': None,
+                        'number_of_points': bestEval['number_of_points'],
+                        'model_node': bestModelNode,
+                        'surface_within_tolerance': targetMin <= bestEval['edge_length'] <= targetMax,
+                        'volume_within_tolerance': False,
+                        'iterations': len(surfaceEvaluations)
+                    }
+                else:
+                    return None
+                
+        except Exception as e:
+            logging.error(f"Optimization completely failed: {str(e)}")
+            return None
+
+    def calculateAverageEdgeLengthSurface(self, meshData):
+        """
+        Calculates the average edge length for a triangle mesh.
+        
+        Args:
+            meshData: The mesh data read using meshio
+            
+        Returns:
+            Average edge length or None if failed
+        """
+        import numpy as np
+        
+        edgeLengths = []
+        
+        cells = [c.data for c in meshData.cells if c.type == "triangle"]
+        for triangles in cells:
+            for triangle in triangles:
+                p1, p2, p3 = meshData.points[triangle]
+                
+                # Calculate edges
+                e1 = np.linalg.norm(p1 - p2)
+                e2 = np.linalg.norm(p2 - p3)
+                e3 = np.linalg.norm(p3 - p1)
+                edgeLengths.extend([e1, e2, e3])
+        
+        return np.mean(edgeLengths) if edgeLengths else None
+
+    def calculateAverageEdgeLengthVolume(self, meshData):
+        """
+        Calculates the average edge length for a tetrahedral mesh.
+        
+        Args:
+            meshData: The mesh data read using meshio
+            
+        Returns:
+            Average edge length or None if failed
+        """
+        import numpy as np
+        
+        edgeLengths = []
+        
+        cells = [c.data for c in meshData.cells if c.type == "tetra"]
+        for tetras in cells:
+            for tetra in tetras:
+                p1, p2, p3, p4 = meshData.points[tetra]
+                
+                # Calculate all 6 edges of the tetrahedron
+                edges = [
+                    np.linalg.norm(p1 - p2),
+                    np.linalg.norm(p1 - p3),
+                    np.linalg.norm(p1 - p4),
+                    np.linalg.norm(p2 - p3),
+                    np.linalg.norm(p2 - p4),
+                    np.linalg.norm(p3 - p4),
+                ]
+                edgeLengths.extend(edges)
+        
+        return np.mean(edgeLengths) if edgeLengths else None
+
+    def removeMeshTriangles(self, inputFilepath):
+        """
+        Load mesh and remove triangles, returning the modified mesh object.
+        """
+        import meshio
+        
+        mesh = meshio.read(inputFilepath)
+        newCells = []
+        newCellData = {key: [] for key in mesh.cell_data} if mesh.cell_data else None
+        
+        for i, cellBlock in enumerate(mesh.cells):
+            if cellBlock.type != "triangle":
+                newCells.append(cellBlock)
+                if newCellData is not None:
+                    for key in mesh.cell_data:
+                        newCellData[key].append(mesh.cell_data[key][i])
+        
+        mesh.cells = newCells
+        if newCellData is not None:
+            mesh.cell_data = newCellData
+        
+        mesh.cell_sets = {}  # remove cell sets to avoid writer errors
+        return mesh
 
     def analyzeMeshQuality(self, modelNode):
         """
@@ -1081,12 +1533,20 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             
         return modelNode
     
-    def createUniformRemesh(self, inputModel, clusterK=10, modelName="UniformRemeshOutput"):
+    def createUniformRemesh(self, inputModel, clusterK=10, outputModelName="UniformRemeshOutput"):
         """
         Create uniform remesh using SurfaceToolbox.
         Aligned with desired workflow's uniform_remesh function.
+        
+        Args:
+            inputModel: Input model node
+            clusterK: Cluster K value for remeshing (number of clusters in K*1000)
+            outputModelName: Name for the output model node
+            
+        Returns:
+            The remeshed model node
         """
-        outputModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", modelName)
+        outputModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", outputModelName)
         surfaceToolBoxLogic = SurfaceToolboxLogic()
         
         parameterNode = surfaceToolBoxLogic.getParameterNode()
