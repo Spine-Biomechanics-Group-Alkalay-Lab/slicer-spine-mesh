@@ -47,7 +47,7 @@ Based on the mesh automation pipeline developed by the FE-Spine group.
     
     def initializeModule(self):
         # Install required Python packages
-        requiredPackages = ["meshio", "pyacvd", "tqdm", "SimpleITK"]
+        requiredPackages = ["meshio", "pyacvd", "tqdm", "SimpleITK", "gmsh"]
         for package in requiredPackages:
             try:
                 __import__(package)
