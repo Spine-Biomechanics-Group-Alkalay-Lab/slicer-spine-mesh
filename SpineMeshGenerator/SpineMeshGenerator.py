@@ -1415,6 +1415,17 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         qualityFilter.SetTetQualityMeasureToAspectRatio()
         qualityFilter.Update()
         
+        # Set the output mesh (with Quality array) back to the model node
+        modelNode.SetAndObserveMesh(qualityFilter.GetOutput())
+        displayNode = modelNode.GetDisplayNode()
+        if displayNode:
+            displayNode.SetActiveScalarName("Quality")
+            displayNode.SetScalarVisibility(True)
+            # Set color table to HotToColdRainbow if available
+            colorNode = slicer.mrmlScene.GetFirstNodeByName("HotToColdRainbow")
+            if colorNode:
+                displayNode.SetAndObserveColorNodeID(colorNode.GetID())
+        
         qualityArray = qualityFilter.GetOutput().GetCellData().GetArray("Quality")
         if not qualityArray:
             logging.error("Unable to compute quality metrics")
