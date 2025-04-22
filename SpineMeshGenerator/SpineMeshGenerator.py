@@ -2136,66 +2136,131 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
     
     def generateSummitFile(self, volume_mesh_path, element_properties_path, output_path, has_material_properties):
         """
-        Generate Summit format file for finite element analysis.
+        Generate Summit format file with comprehensive material properties for finite element analysis.
         """
         import vtk
+        from vtk.util import numpy_support
+        import numpy as np
+        import pandas as pd
+        import math
         
-        # Read the mesh
+        # Material constants
+        E0 = 4e9      # Initial Young's modulus
+        E1 = 1.09e9   # Young's modulus B1
+        E2 = 5.8e9    # Young's modulus B2
+        B1 = 3.26e5   # Viscosity B1
+        B2 = 5.6e2    # Viscosity B2
+        k = 1.5       # Power law exponent
+        mexponent = 18.24  # Plasticity exponent
+        poissonratio = 0.3  # Poisson's ratio
+        density = 1800    # Material density
+        BVTV_min = 1e-3  # Minimum BV/TV value
+        s0 = 1.4e8     # Initial plasticity stress
+        
+        # Read the mesh using VTK
         reader = vtk.vtkUnstructuredGridReader()
         reader.SetFileName(volume_mesh_path)
         reader.Update()
         mesh = reader.GetOutput()
         
-        # Load material properties if available
-        element_properties = {}
+        # Extract coordinates (convert from mm to m)
+        points = numpy_support.vtk_to_numpy(mesh.GetPoints().GetData()) * 1e-3
+        
+        # Extract tetrahedral elements
+        tetra_elements = []
+        for i in range(mesh.GetNumberOfCells()):
+            cell = mesh.GetCell(i)
+            if cell.GetCellType() == vtk.VTK_TETRA:
+                point_ids = [cell.GetPointId(j) + 1 for j in range(cell.GetNumberOfPoints())]  # +1 for 1-based indexing
+                tetra_elements.append(point_ids)
+        elements = np.array(tetra_elements)
+        
+        # Load material properties
+        bvtv_vector = []
         if has_material_properties and element_properties_path and os.path.exists(element_properties_path):
-            with open(element_properties_path, 'r') as f:
-                next(f)  # Skip header
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 4:
-                        element_id = int(parts[0])
-                        bvtv = float(parts[3])  # BV/TV
-                        # Compute Young's modulus using power law E = 6950 * (BV/TV)^1.49
-                        young_modulus = 6950 * (bvtv ** 1.49)
-                        element_properties[element_id] = young_modulus
+            df = pd.read_csv(element_properties_path)
+            df = df.sort_values('New_Element_ID')
+            bvtv_dict = dict(zip(df['New_Element_ID'], df['BV/TV']))
+            max_element_id = df['New_Element_ID'].max()
+            bvtv_vector = [max(bvtv_dict.get(i, BVTV_min), BVTV_min) for i in range(max_element_id + 1)]
+        else:
+            bvtv_vector = [BVTV_min] * len(elements)
         
         # Write Summit file
         with open(output_path, 'w') as f:
-            nNodes = mesh.GetNumberOfPoints()
-            nElems = mesh.GetNumberOfCells()
-            
             # Write header
-            f.write("3\n")
-            f.write(f"{nNodes} {nElems} 1 1\n")
+            f.write("3\n")  # 3D
+            f.write(f"{len(points)} {len(elements)} 1 1\n")
             
             # Write node coordinates
-            for i in range(nNodes):
-                point = mesh.GetPoint(i)
-                f.write(f"{point[0]:.15f} {point[1]:.15f} {point[2]:.15f}\n")
+            for point in points:
+                f.write(f"{point[0]} {point[1]} {point[2]}\n")
             
             # Write elements
-            for i in range(nElems):
-                cell = mesh.GetCell(i)
-                if cell.GetCellType() == vtk.VTK_TETRA:
-                    point_ids = [str(cell.GetPointId(j)) for j in range(cell.GetNumberOfPoints())]
-                    f.write(f"1 {' '.join(point_ids)}\n")
-                else:
-                    f.write(f"1 0 0 0 0\n")
+            for element in elements:
+                f.write(f"4 {element[0]} {element[1]} {element[2]} {element[3]} 1 Tet1CG\n")
             
             # Write material properties
-            f.write("10\n")
-            if has_material_properties and element_properties:
-                for i in range(nElems):
-                    young_modulus = element_properties.get(i, 6950 * (0.001 ** 1.49))
-                    f.write(f"{young_modulus:.15f}\n")
-            else:
-                default_modulus = 6950 * (0.001 ** 1.49)
-                for _ in range(nElems):
-                    f.write(f"{default_modulus:.15f}\n")
+            f.write("10\n")  # Number of variables
+            
+            # BVTV
+            f.write("BVTV\n")
+            for bvtv in bvtv_vector:
+                f.write(f"{bvtv:.3f}\n")
+            
+            # Young modulus A
+            f.write("Young modulus A\n")
+            for bvtv in bvtv_vector:
+                EA = E0 * math.pow(bvtv, k)
+                f.write(f"{EA:.5e}\n")
+            
+            # Young modulus B1
+            f.write("Young modulus B1\n")
+            for bvtv in bvtv_vector:
+                EB1 = E1 * math.pow(bvtv, k)
+                f.write(f"{EB1:.5e}\n")
+            
+            # Young modulus B2
+            f.write("Young modulus B2\n")
+            for bvtv in bvtv_vector:
+                EB2 = E2 * math.pow(bvtv, k)
+                f.write(f"{EB2:.5e}\n")
+            
+            # Viscosity B1
+            f.write("Viscosity B1\n")
+            for bvtv in bvtv_vector:
+                VB1 = B1 * math.pow(bvtv, k)
+                f.write(f"{VB1:.5e}\n")
+            
+            # Viscosity B2
+            f.write("Viscosity B2\n")
+            for bvtv in bvtv_vector:
+                VB2 = B2 * math.pow(bvtv, k)
+                f.write(f"{VB2:.5e}\n")
+            
+            # Plasticity stress
+            f.write("Plasticity stress\n")
+            for bvtv in bvtv_vector:
+                si = s0 * math.pow(bvtv, k)
+                f.write(f"{si:.5e}\n")
+            
+            # Plasticity exponent
+            f.write("Plasticity exponent\n")
+            for _ in bvtv_vector:
+                f.write(f"{mexponent}\n")
+            
+            # Poisson ratio
+            f.write("Poisson ratio\n")
+            for _ in bvtv_vector:
+                f.write(f"{poissonratio}\n")
+            
+            # Density
+            f.write("density\n")
+            for _ in bvtv_vector:
+                f.write(f"{density}\n")
         
-        logging.info(f"Summit file saved to {output_path}")
-    
+        logging.info(f"Enhanced Summit file saved to {output_path}")
+
     def createGmshScript(self, script_path):
         """
         Create a Python script for GMSH mesh generation.
