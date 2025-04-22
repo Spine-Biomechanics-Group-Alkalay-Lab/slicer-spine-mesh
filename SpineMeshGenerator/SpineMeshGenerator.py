@@ -73,6 +73,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.clippingEnabled = False
         self.clippingNode = None
         self.sliceNodes = {}
+        self._segmentVisibilityStates = {}  # Store visibility states
 
     def setup(self):
         """Called when the widget is initialized."""
@@ -164,6 +165,10 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         # Create segment table view and update it
         self.setupSegmentTable()
         self.updateSegmentTable()
+        
+        # Add observers for scene changes
+        self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAddedEvent, self.onSceneNodeAdded)
+        self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeRemovedEvent, self.onSceneNodeRemoved)
 
     def setupSegmentTable(self):
         """Set up the segment table widget."""
@@ -224,49 +229,101 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             if self._parameterNode is None:
                 logging.error("Failed to initialize parameter node")
                 return
+
+        # Find all segmentation nodes in the scene
+        segmentationNodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
         
-        segmentationNode = None
-        segmentEditorSingletonTag = "SegmentEditor"
-        segmentEditorNode = slicer.mrmlScene.GetSingletonNode(segmentEditorSingletonTag, "vtkMRMLSegmentEditorNode")
-        if segmentEditorNode:
-            segmentationNode = segmentEditorNode.GetSegmentationNode()
-        if not segmentationNode:
-            segmentationNodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
-            if segmentationNodes:
-                segmentationNode = segmentationNodes[0]
-        if not segmentationNode:
-            self.ui.segmentsTableWidget.setRowCount(0)
-            return
+        # Clear existing table
+        self.ui.segmentsTableWidget.setRowCount(0)
         
-        # Make sure the segmentation node has a display node
-        if not segmentationNode.GetDisplayNode():
-            segmentationNode.CreateDefaultDisplayNodes()
+        # Update current segmentation reference in parameter node if needed
+        if segmentationNodes and not self._parameterNode.GetNodeReferenceID("CurrentSegmentation"):
+            self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNodes[0].GetID())
         
-        segmentation = segmentationNode.GetSegmentation()
-        numSegments = segmentation.GetNumberOfSegments()
-        if numSegments == 0:
-            self.ui.segmentsTableWidget.setRowCount(0)
-            return
+        row = 0
+        for segmentationNode in segmentationNodes:
+            if not segmentationNode.GetDisplayNode():
+                segmentationNode.CreateDefaultDisplayNodes()
+                
+            # If this is the first segmentation node and no current segmentation is set
+            if row == 0 and not self._parameterNode.GetNodeReferenceID("CurrentSegmentation"):
+                self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNode.GetID())
+                
+            segmentation = segmentationNode.GetSegmentation()
+            
+            # Add all segments from this segmentation
+            for segmentIndex in range(segmentation.GetNumberOfSegments()):
+                segmentID = segmentation.GetNthSegmentID(segmentIndex)
+                segment = segmentation.GetSegment(segmentID)
+                segmentName = segment.GetName()
+                
+                self.ui.segmentsTableWidget.insertRow(row)
+                
+                # Create segment name item
+                nameItem = qt.QTableWidgetItem(f"{segmentationNode.GetName()}: {segmentName}")
+                self.ui.segmentsTableWidget.setItem(row, 0, nameItem)
+                
+                # Create checkbox
+                checkBox = qt.QCheckBox()
+                checkBox.checked = self.segmentSelectionDict.get(segmentID, False)
+                checkBox.connect("toggled(bool)", 
+                    lambda checked, sID=segmentID, node=segmentationNode: 
+                    self.onSegmentSelectionChanged(sID, checked, node))
+                
+                self.ui.segmentsTableWidget.setCellWidget(row, 1, checkBox)
+                
+                # Update visibility based on current selection
+                self.updateSegmentVisibility(segmentID, checkBox.checked, segmentationNode)
+                
+                row += 1
         
-        self.ui.segmentsTableWidget.setRowCount(numSegments)
-        for i in range(numSegments):
-            segmentID = segmentation.GetNthSegmentID(i)
-            segment = segmentation.GetSegment(segmentID)
-            segmentName = segment.GetName()
-            checkBox = qt.QCheckBox()
-            checkBox.checked = self.segmentSelectionDict.get(segmentID, True)
-            checkBox.connect("toggled(bool)", lambda checked, sID=segmentID: self.onSegmentSelectionChanged(sID, checked))
-            nameItem = qt.QTableWidgetItem(segmentName)
-            self.ui.segmentsTableWidget.setItem(i, 0, nameItem)
-            self.ui.segmentsTableWidget.setCellWidget(i, 1, checkBox)
-            self.segmentSelectionDict[segmentID] = checkBox.checked
-        
-        self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNode.GetID())
+        # Force GUI update
         self.updateGUIFromParameterNode()
 
-    def onSegmentSelectionChanged(self, segmentID, checked):
+    def onSegmentSelectionChanged(self, segmentID, checked, segmentationNode):
+        """Handle segment selection changes and update visibility"""
         self.segmentSelectionDict[segmentID] = checked
-        self.updateParameterNodeFromGUI()
+        
+        # Update current segmentation reference in parameter node
+        if checked and segmentationNode:
+            self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNode.GetID())
+        
+        self.updateSegmentVisibility(segmentID, checked, segmentationNode)
+        self.updateGUIFromParameterNode()
+
+    def updateSegmentVisibility(self, segmentID, visible, segmentationNode):
+        """Update the visibility of a segment and its parent hierarchy"""
+        if not segmentationNode or not segmentationNode.GetDisplayNode():
+            return
+            
+        # Store the original visibility state if not already stored
+        if segmentID not in self._segmentVisibilityStates:
+            self._segmentVisibilityStates[segmentID] = segmentationNode.GetDisplayNode().GetSegmentVisibility(segmentID)
+            
+        # Set segment visibility
+        segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, visible)
+        
+        # Make sure the segmentation node itself is visible if any segment is visible
+        if visible:
+            segmentationNode.GetDisplayNode().SetVisibility(True)
+            
+            # Check subject hierarchy visibility
+            shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+            segmentationShItemID = shNode.GetItemByDataNode(segmentationNode)
+            
+            # Make all parents visible
+            parentItemID = shNode.GetItemParent(segmentationShItemID)
+            while parentItemID != shNode.GetSceneItemID():
+                shNode.SetDisplayVisibilityForBranch(parentItemID, True)
+                parentItemID = shNode.GetItemParent(parentItemID)
+
+    def onSceneNodeAdded(self, caller, event):
+        """Handle new nodes added to the scene"""
+        self.updateSegmentTable()
+
+    def onSceneNodeRemoved(self, caller, event):
+        """Handle nodes removed from the scene"""
+        self.updateSegmentTable()
 
     def onSelectAllSegments(self):
         segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
@@ -442,16 +499,20 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             self.clippingNode = None
 
     def cleanup(self):
+        """Clean up observers and restore original visibility states"""
+        # Restore original visibility states
+        for segmentID, originalState in self._segmentVisibilityStates.items():
+            segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
+            if segmentationNodeID:
+                segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
+                if segmentationNode and segmentationNode.GetDisplayNode():
+                    segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, originalState)
+        
+        self._segmentVisibilityStates.clear()
         self.removeObservers()
-        # Clean up clipping if enabled
-        if self.clippingEnabled:
-            self.disableClipping()
-        # Remove all observers
-        if hasattr(self, '_observers'):
-            for obj, tag in self._observers:
-                if obj is not None and tag is not None:
-                    obj.RemoveObserver(tag)
-            self._observers = []
+        
+        # Call original cleanup
+        ScriptedLoadableModuleWidget.cleanup(self)
 
     def enter(self):
         self.initializeParameterNode()
@@ -503,40 +564,58 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         if self._parameterNode is None or self._updatingGUIFromParameterNode:
             return
         self._updatingGUIFromParameterNode = True
-        self.ui.inputVolumeSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
-        self.ui.outputDirectorySelector.directory = self._parameterNode.GetParameter("OutputDirectory") or ""
-        self.ui.targetEdgeLengthSpinBox.value = float(self._parameterNode.GetParameter("TargetEdgeLength") or 1.37)
-        outputFormat = self._parameterNode.GetParameter("OutputFormat") or "all"
-        formatIndex = -1
-        for i in range(self.ui.outputFormatComboBox.count):
-            if str(self.ui.outputFormatComboBox.itemData(i)) == outputFormat:
-                formatIndex = i
-                break
-        if formatIndex >= 0:
-            self.ui.outputFormatComboBox.currentIndex = formatIndex
-        materialMapping = self._parameterNode.GetParameter("EnableMaterialMapping") == "true"
-        self.ui.enableMaterialMappingCheckBox.checked = materialMapping
-        self.ui.materialMappingGroupBox.setVisible(materialMapping)
-        self.ui.slopeSpinBox.value = float(self._parameterNode.GetParameter("Slope") or 0.7)
-        self.ui.interceptSpinBox.value = float(self._parameterNode.GetParameter("Intercept") or 5.1)
         
-        # Update model selector with available models (new)
-        if not self.ui.modelSelector.currentNode():
-            # Try to find a volume mesh node to pre-select
-            volumeMeshNodes = slicer.util.getNodesByClass("vtkMRMLModelNode")
-            for node in volumeMeshNodes:
-                if "_volume_mesh" in node.GetName():
-                    self.ui.modelSelector.setCurrentNode(node)
+        try:
+            # Update all the GUI elements
+            self.ui.inputVolumeSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
+            self.ui.outputDirectorySelector.directory = self._parameterNode.GetParameter("OutputDirectory") or ""
+            self.ui.targetEdgeLengthSpinBox.value = float(self._parameterNode.GetParameter("TargetEdgeLength") or 1.37)
+            
+            # Update output format
+            outputFormat = self._parameterNode.GetParameter("OutputFormat") or "all"
+            formatIndex = -1
+            for i in range(self.ui.outputFormatComboBox.count):
+                if str(self.ui.outputFormatComboBox.itemData(i)) == outputFormat:
+                    formatIndex = i
                     break
-        
-        # Check if we can apply
-        canApply = (self._parameterNode.GetNodeReference("InputVolume") and 
-                    self._parameterNode.GetNodeReferenceID("CurrentSegmentation") and 
-                    self._parameterNode.GetParameter("OutputDirectory"))
-        if canApply:
-            canApply = any(self.segmentSelectionDict.values())
-        self.ui.applyButton.enabled = canApply
-        self._updatingGUIFromParameterNode = False
+            if formatIndex >= 0:
+                self.ui.outputFormatComboBox.currentIndex = formatIndex
+                
+            # Update material mapping
+            materialMapping = self._parameterNode.GetParameter("EnableMaterialMapping") == "true"
+            self.ui.enableMaterialMappingCheckBox.checked = materialMapping
+            self.ui.materialMappingGroupBox.setVisible(materialMapping)
+            self.ui.slopeSpinBox.value = float(self._parameterNode.GetParameter("Slope") or 0.7)
+            self.ui.interceptSpinBox.value = float(self._parameterNode.GetParameter("Intercept") or 5.1)
+            
+            # Check if we can apply - all conditions must be met
+            inputVolumeValid = self._parameterNode.GetNodeReference("InputVolume") is not None
+            outputDirValid = bool(self._parameterNode.GetParameter("OutputDirectory"))
+            
+            # Check if any segments are selected
+            anySegmentSelected = False
+            for isSelected in self.segmentSelectionDict.values():
+                if isSelected:
+                    anySegmentSelected = True
+                    break
+            
+            # Find the current segmentation node
+            segmentationNodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
+            hasValidSegmentation = len(segmentationNodes) > 0
+            
+            # Enable apply button only if all conditions are met
+            self.ui.applyButton.enabled = (
+                inputVolumeValid and 
+                outputDirValid and 
+                anySegmentSelected and 
+                hasValidSegmentation
+            )
+            
+        except Exception as e:
+            logging.error(f"Error updating GUI from parameter node: {str(e)}")
+            self.ui.applyButton.enabled = False
+        finally:
+            self._updatingGUIFromParameterNode = False
 
     def updateParameterNodeFromGUI(self, caller=None, event=None):
         if self._parameterNode is None or self._updatingGUIFromParameterNode:
