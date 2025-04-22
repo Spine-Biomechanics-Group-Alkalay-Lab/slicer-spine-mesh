@@ -72,6 +72,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.segmentSelectionDict = {}  # Store segment selection info
         self.clippingEnabled = False
         self.clippingNode = None
+        self.sliceNodes = {}
 
     def setup(self):
         """Called when the widget is initialized."""
@@ -104,12 +105,15 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         # Connect Apply button
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
 
-        # Connect clipping controls (new)
-        self.ui.enableClippingButton.connect("clicked(bool)", self.onEnableClippingButtonClicked)
-        self.ui.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onModelSelected)
-        self.ui.clipDirectionComboBox.connect("currentIndexChanged(int)", self.updateClippingDirection)
-        self.ui.clipSliderWidget.connect("valueChanged(double)", self.updateClippingPosition)
-        self.ui.flipClipCheckBox.connect("toggled(bool)", self.updateClippingFlip)
+        # Connect clipping controls
+        self.ui.enableClippingButton.connect('toggled(bool)', self.onEnableClippingButtonToggled)
+        self.ui.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onModelSelectedForClipping)
+        self.ui.redSliceOffsetSlider.connect('valueChanged(double)', lambda value: self.onSliceOffsetChanged('Red', value))
+        self.ui.yellowSliceOffsetSlider.connect('valueChanged(double)', lambda value: self.onSliceOffsetChanged('Yellow', value))
+        self.ui.greenSliceOffsetSlider.connect('valueChanged(double)', lambda value: self.onSliceOffsetChanged('Green', value))
+        
+        # Hide clipping controls initially
+        self.ui.clippingControlsGroupBox.setVisible(False)
 
         # Setup quality analysis section
         self.ui.qualityAnalysisMeshSelector.nodeTypes = ["vtkMRMLModelNode"]
@@ -144,13 +148,6 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.outputFormatComboBox.addItem("Abaqus INP", "inp")
         self.ui.outputFormatComboBox.addItem("GMSH", "msh")
         self.ui.outputFormatComboBox.addItem("Summit", "summit")
-        
-        # Setup clip direction options (new)
-        self.ui.clipDirectionComboBox.clear()
-        self.ui.clipDirectionComboBox.addItem("Axial (X-Y)", 0)
-        self.ui.clipDirectionComboBox.addItem("Sagittal (Y-Z)", 1)
-        self.ui.clipDirectionComboBox.addItem("Coronal (X-Z)", 2)
-        self.ui.clipDirectionComboBox.setCurrentIndex(0)  # Default to Axial
         
         # Update target edge length default to match config (1.37mm)
         self.ui.targetEdgeLengthSpinBox.setValue(1.37)
@@ -308,157 +305,106 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.updateParameterNodeFromGUI()
         
     # New methods for clipping feature
-    def onEnableClippingButtonClicked(self):
+    def onEnableClippingButtonToggled(self, enabled):
         """Toggle clipping on/off"""
-        self.clippingEnabled = not self.clippingEnabled
-        self.ui.clippingControlsGroupBox.setVisible(self.clippingEnabled)
+        self.ui.clippingControlsGroupBox.setVisible(enabled)
+        modelNode = self.ui.modelSelector.currentNode()
         
-        if self.clippingEnabled:
-            self.ui.enableClippingButton.setText("Disable Clipping")
-            modelNode = self.ui.modelSelector.currentNode()
-            if modelNode:
-                self.setupClippingForModel(modelNode)
+        if enabled and modelNode:
+            self.setupClipping(modelNode)
         else:
-            self.ui.enableClippingButton.setText("Enable Clipping")
-            self.disableClipping()
+            self.disableClipping(modelNode)
             
-    def onModelSelected(self, modelNode):
+        # Update button text
+        self.ui.enableClippingButton.setText("Disable Clipping" if enabled else "Enable Clipping")
+
+    def onModelSelectedForClipping(self, modelNode):
         """Handle selection of a model for clipping"""
-        if self.clippingEnabled and modelNode:
-            # Disable clipping on previous model if there was one
-            self.disableClipping()
-            # Set up clipping for the newly selected model
-            self.setupClippingForModel(modelNode)
-        elif self.clippingEnabled and not modelNode:
-            self.disableClipping()
+        if modelNode:
+            # Update slider ranges based on model bounds
+            bounds = [0] * 6
+            modelNode.GetBounds(bounds)
             
-    def setupClippingForModel(self, modelNode):
+            # Set ranges for each slider based on model bounds
+            self.ui.redSliceOffsetSlider.minimum = bounds[4]
+            self.ui.redSliceOffsetSlider.maximum = bounds[5]  # Z range for axial
+            
+            self.ui.yellowSliceOffsetSlider.minimum = bounds[0]
+            self.ui.yellowSliceOffsetSlider.maximum = bounds[1]  # X range for sagittal
+            
+            self.ui.greenSliceOffsetSlider.minimum = bounds[2]
+            self.ui.greenSliceOffsetSlider.maximum = bounds[3]  # Y range for coronal
+            
+            # Set initial values to middle of ranges
+            self.ui.redSliceOffsetSlider.value = (bounds[4] + bounds[5]) / 2
+            self.ui.yellowSliceOffsetSlider.value = (bounds[0] + bounds[1]) / 2
+            self.ui.greenSliceOffsetSlider.value = (bounds[2] + bounds[3]) / 2
+            
+            # If clipping is already enabled, update it for the new model
+            if self.ui.enableClippingButton.checked:
+                self.setupClipping(modelNode)
+
+    def setupClipping(self, modelNode):
         """Set up clipping for the selected model"""
         if not modelNode:
             return
             
-        # Clean up any existing clipping node
-        self.disableClipping()
+        # Create new clip node if needed
+        if not self.clippingNode:
+            self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
+            self.clippingNode.SetScene(slicer.mrmlScene)
+            
+        # Configure clipping node
+        self.clippingNode.SetClipType(0)  # Straight cut
         
-        # Create a new clipping node
-        self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
-        self.clippingNode.SetScene(slicer.mrmlScene)
-        
-        # Get model bounds
-        bounds = [0, 0, 0, 0, 0, 0]
-        modelNode.GetBounds(bounds)
-        
-        # Set initial clipping parameters
-        clipDirection = self.ui.clipDirectionComboBox.currentIndex
-        self.clippingNode.SetClipType(clipDirection)
-        self.clippingNode.SetRedSliceClipState(1)  # 1 = positive side (keep)
-        self.clippingNode.SetYellowSliceClipState(1)
-        self.clippingNode.SetGreenSliceClipState(1)
-        
-        # Initialize slice positions based on model bounds
-        sliceLogic = slicer.app.layoutManager().sliceWidget("Red").sliceLogic()
-        sliceNode = sliceLogic.GetSliceNode()
-        sliceOffset = (bounds[1] + bounds[0]) / 2  # Middle of model
-        sliceNode.SetSliceOffset(sliceOffset)
-        
-        # Set slider range to model bounds
-        if clipDirection == 0:  # Axial (Red slice - Z axis)
-            self.ui.clipSliderWidget.minimum = bounds[4]  # Z min
-            self.ui.clipSliderWidget.maximum = bounds[5]  # Z max
-            self.ui.clipSliderWidget.value = (bounds[4] + bounds[5]) / 2
-        elif clipDirection == 1:  # Sagittal (Yellow slice - X axis)
-            self.ui.clipSliderWidget.minimum = bounds[0]  # X min
-            self.ui.clipSliderWidget.maximum = bounds[1]  # X max
-            self.ui.clipSliderWidget.value = (bounds[0] + bounds[1]) / 2
-        else:  # Coronal (Green slice - Y axis)
-            self.ui.clipSliderWidget.minimum = bounds[2]  # Y min
-            self.ui.clipSliderWidget.maximum = bounds[3]  # Y max
-            self.ui.clipSliderWidget.value = (bounds[2] + bounds[3]) / 2
-        
-        # Set model visibility to clipping
+        # Enable clipping in model display
         displayNode = modelNode.GetDisplayNode()
         if displayNode:
             displayNode.SetClipping(1)
             
-        # Enable clipping in Slicer
-        slicer.mrmlScene.AddNode(self.clippingNode)
+        # Initialize slice nodes if not already done
+        layoutManager = slicer.app.layoutManager()
+        for color in ['Red', 'Yellow', 'Green']:
+            if color not in self.sliceNodes:
+                sliceWidget = layoutManager.sliceWidget(color)
+                if sliceWidget:
+                    self.sliceNodes[color] = sliceWidget.mrmlSliceNode()
+                    
+        # Set initial clipping states
+        self.clippingNode.SetRedSliceClipState(1)
+        self.clippingNode.SetYellowSliceClipState(1)
+        self.clippingNode.SetGreenSliceClipState(1)
         
-        # Store reference to model for later use
-        self._parameterNode.SetNodeReferenceID("CurrentClippedModel", modelNode.GetID())
-        
-    def disableClipping(self):
+        # Update slice positions
+        self.updateSlicePositions()
+
+    def onSliceOffsetChanged(self, sliceColor, value):
+        """Handle changes in slice offset sliders"""
+        if sliceColor in self.sliceNodes and self.sliceNodes[sliceColor]:
+            self.sliceNodes[sliceColor].SetSliceOffset(value)
+
+    def updateSlicePositions(self):
+        """Update all slice positions based on current slider values"""
+        if 'Red' in self.sliceNodes:
+            self.sliceNodes['Red'].SetSliceOffset(self.ui.redSliceOffsetSlider.value)
+        if 'Yellow' in self.sliceNodes:
+            self.sliceNodes['Yellow'].SetSliceOffset(self.ui.yellowSliceOffsetSlider.value)
+        if 'Green' in self.sliceNodes:
+            self.sliceNodes['Green'].SetSliceOffset(self.ui.greenSliceOffsetSlider.value)
+
+    def disableClipping(self, modelNode=None):
         """Disable and clean up clipping"""
+        if not modelNode:
+            modelNode = self.ui.modelSelector.currentNode()
+            
+        if modelNode:
+            displayNode = modelNode.GetDisplayNode()
+            if displayNode:
+                displayNode.SetClipping(0)
+                
         if self.clippingNode:
             slicer.mrmlScene.RemoveNode(self.clippingNode)
             self.clippingNode = None
-            
-        # Disable clipping on the model's display node
-        modelNodeID = self._parameterNode.GetNodeReferenceID("CurrentClippedModel")
-        if modelNodeID:
-            modelNode = slicer.mrmlScene.GetNodeByID(modelNodeID)
-            if modelNode:
-                displayNode = modelNode.GetDisplayNode()
-                if displayNode:
-                    displayNode.SetClipping(0)
-            self._parameterNode.SetNodeReferenceID("CurrentClippedModel", "")
-            
-    def updateClippingDirection(self, index):
-        """Update the clipping direction based on combo box selection"""
-        if not self.clippingEnabled or not self.clippingNode:
-            return
-            
-        direction = index
-        self.clippingNode.SetClipType(direction)
-        
-        # Update slider range for the new direction
-        modelNode = self.ui.modelSelector.currentNode()
-        if modelNode:
-            bounds = [0, 0, 0, 0, 0, 0]
-            modelNode.GetBounds(bounds)
-            
-            if direction == 0:  # Axial
-                self.ui.clipSliderWidget.minimum = bounds[4]  # Z min
-                self.ui.clipSliderWidget.maximum = bounds[5]  # Z max
-                self.ui.clipSliderWidget.value = (bounds[4] + bounds[5]) / 2
-            elif direction == 1:  # Sagittal
-                self.ui.clipSliderWidget.minimum = bounds[0]  # X min
-                self.ui.clipSliderWidget.maximum = bounds[1]  # X max
-                self.ui.clipSliderWidget.value = (bounds[0] + bounds[1]) / 2
-            else:  # Coronal
-                self.ui.clipSliderWidget.minimum = bounds[2]  # Y min
-                self.ui.clipSliderWidget.maximum = bounds[3]  # Y max
-                self.ui.clipSliderWidget.value = (bounds[2] + bounds[3]) / 2
-                
-    def updateClippingPosition(self, position):
-        """Update the clipping position based on slider value"""
-        if not self.clippingEnabled or not self.clippingNode:
-            return
-            
-        direction = self.ui.clipDirectionComboBox.currentIndex
-        
-        # Update the slice position based on direction
-        layoutManager = slicer.app.layoutManager()
-        if direction == 0:  # Axial (Red slice)
-            sliceWidget = layoutManager.sliceWidget("Red")
-        elif direction == 1:  # Sagittal (Yellow slice)
-            sliceWidget = layoutManager.sliceWidget("Yellow")
-        else:  # Coronal (Green slice)
-            sliceWidget = layoutManager.sliceWidget("Green")
-            
-        if sliceWidget:
-            sliceLogic = sliceWidget.sliceLogic()
-            sliceNode = sliceLogic.GetSliceNode()
-            sliceNode.SetSliceOffset(position)
-        
-    def updateClippingFlip(self, flip):
-        """Flip the clipping direction"""
-        if not self.clippingEnabled or not self.clippingNode:
-            return
-            
-        clipState = 2 if flip else 1  # 1 = positive side, 2 = negative side
-        self.clippingNode.SetRedSliceClipState(clipState)
-        self.clippingNode.SetYellowSliceClipState(clipState)
-        self.clippingNode.SetGreenSliceClipState(clipState)
 
     def cleanup(self):
         self.removeObservers()
@@ -1571,7 +1517,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         parameterNode.SetParameter("normals", "false")
         parameterNode.SetParameter("mirror", "false")
         parameterNode.SetParameter("mirrorX", "false")
-        parameterNode.SetParameter("mirrorY", "false") 
+        parameterNode.SetParameter("mirrorY", "false")
         parameterNode.SetParameter("mirrorZ", "false")
         parameterNode.SetParameter("cleaner", "false")
         parameterNode.SetParameter("connectivity", "false")

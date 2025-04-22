@@ -246,7 +246,7 @@
      </layout>
     </widget>
    </item>
-   <!-- New Clipping Section -->
+   <!-- Replace existing Clipping Section with this -->
    <item>
     <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
      <property name="text">
@@ -291,10 +291,13 @@
       <item>
        <widget class="QPushButton" name="enableClippingButton">
         <property name="toolTip">
-         <string>Enable/disable mesh clipping to inspect the internal structure</string>
+         <string>Enable/disable mesh clipping</string>
         </property>
         <property name="text">
          <string>Enable Clipping</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
@@ -305,40 +308,44 @@
         </property>
         <layout class="QFormLayout" name="formLayout_5">
          <item row="0" column="0">
-          <widget class="QLabel" name="label_10">
+          <widget class="QLabel" name="label_red">
            <property name="text">
-            <string>Clipping Direction:</string>
+            <string>Axial (Red):</string>
            </property>
           </widget>
          </item>
          <item row="0" column="1">
-          <widget class="QComboBox" name="clipDirectionComboBox">
+          <widget class="ctkSliderWidget" name="redSliceOffsetSlider">
            <property name="toolTip">
-            <string>Select the clipping plane orientation</string>
+            <string>Adjust clipping in axial plane</string>
            </property>
           </widget>
          </item>
          <item row="1" column="0">
-          <widget class="QLabel" name="label_11">
+          <widget class="QLabel" name="label_yellow">
            <property name="text">
-            <string>Clip Position:</string>
+            <string>Sagittal (Yellow):</string>
            </property>
           </widget>
          </item>
          <item row="1" column="1">
-          <widget class="ctkSliderWidget" name="clipSliderWidget">
+          <widget class="ctkSliderWidget" name="yellowSliceOffsetSlider">
            <property name="toolTip">
-            <string>Adjust the position of the clipping plane</string>
+            <string>Adjust clipping in sagittal plane</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="0" colspan="2">
-          <widget class="QCheckBox" name="flipClipCheckBox">
-           <property name="toolTip">
-            <string>Flip which side of the model is clipped</string>
-           </property>
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_green">
            <property name="text">
-            <string>Flip Clipping Direction</string>
+            <string>Coronal (Green):</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="ctkSliderWidget" name="greenSliceOffsetSlider">
+           <property name="toolTip">
+            <string>Adjust clipping in coronal plane</string>
            </property>
           </widget>
          </item>
@@ -348,6 +355,7 @@
      </layout>
     </widget>
    </item>
+   <!-- End of Updated Clipping Section -->
    <!-- New Quality Analysis Section -->
 <item>
   <widget class="ctkCollapsibleButton" name="qualityAnalysisCollapsibleButton">
