@@ -351,16 +351,25 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             
         # Create new clip node if needed
         if not self.clippingNode:
-            self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
-            self.clippingNode.SetScene(slicer.mrmlScene)
+            # First try to get existing clip node
+            existingClipNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLClipModelsNode")
+            if existingClipNode:
+                self.clippingNode = existingClipNode
+            else:
+                self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
             
         # Configure clipping node
-        self.clippingNode.SetClipType(0)  # Straight cut
+        self.clippingNode.SetClipType(2)  # 2 = Keep whole cells mode
+        self.clippingNode.SetRedSliceClipState(1)  # Enable clipping in each view
+        self.clippingNode.SetYellowSliceClipState(1)
+        self.clippingNode.SetGreenSliceClipState(1)
         
-        # Enable clipping in model display
+        # Update display node clipping settings
         displayNode = modelNode.GetDisplayNode()
         if displayNode:
             displayNode.SetClipping(1)
+            # The correct method is SetAndObserveClipNodeID
+            displayNode.SetAndObserveClipNodeID(self.clippingNode.GetID())
             
         # Initialize slice nodes if not already done
         layoutManager = slicer.app.layoutManager()
@@ -369,13 +378,11 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
                 sliceWidget = layoutManager.sliceWidget(color)
                 if sliceWidget:
                     self.sliceNodes[color] = sliceWidget.mrmlSliceNode()
-                    
-        # Set initial clipping states
-        self.clippingNode.SetRedSliceClipState(1)
-        self.clippingNode.SetYellowSliceClipState(1)
-        self.clippingNode.SetGreenSliceClipState(1)
+                    # Link slice node to clip node
+                    self.clippingNode.AddObserver(vtk.vtkCommand.ModifiedEvent, 
+                                                lambda caller, event: self.updateSlicePositions())
         
-        # Update slice positions
+        # Update initial slice positions
         self.updateSlicePositions()
 
     def onSliceOffsetChanged(self, sliceColor, value):
@@ -1368,7 +1375,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             displayNode.SetActiveScalarName("Quality")
             displayNode.SetScalarVisibility(True)
             # Set color table to HotToColdRainbow if available
-            colorNode = slicer.mrmlScene.GetFirstNodeByName("HotToColdRainbow")
+            colorNode = slicer.mrmlScene.GetFirstNodeByName("Warm1")
             if colorNode:
                 displayNode.SetAndObserveColorNodeID(colorNode.GetID())
         
