@@ -349,41 +349,45 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         if not modelNode:
             return
             
-        # Create new clip node if needed
-        if not self.clippingNode:
-            # First try to get existing clip node
-            existingClipNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLClipModelsNode")
-            if existingClipNode:
-                self.clippingNode = existingClipNode
-            else:
-                self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
+        try:
+            # Create new clip node if needed
+            if not self.clippingNode:
+                existingClipNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLClipModelsNode")
+                if existingClipNode:
+                    self.clippingNode = existingClipNode
+                else:
+                    self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
             
-        # Configure clipping node
-        self.clippingNode.SetClipType(2)  # 2 = Keep whole cells mode
-        self.clippingNode.SetRedSliceClipState(1)  # Enable clipping in each view
-        self.clippingNode.SetYellowSliceClipState(1)
-        self.clippingNode.SetGreenSliceClipState(1)
-        
-        # Update display node clipping settings
-        displayNode = modelNode.GetDisplayNode()
-        if displayNode:
+            # Configure clipping node
+            self.clippingNode.SetClipType(2)  # 2 = Keep whole cells mode
+            self.clippingNode.SetRedSliceClipState(1)
+            self.clippingNode.SetYellowSliceClipState(1)
+            self.clippingNode.SetGreenSliceClipState(1)
+            
+            # Update display node clipping settings
+            displayNode = modelNode.GetDisplayNode()
+            if not displayNode:
+                displayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelDisplayNode")
+                modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
+            
             displayNode.SetClipping(1)
-            # The correct method is SetAndObserveClipNodeID
             displayNode.SetAndObserveClipNodeID(self.clippingNode.GetID())
             
-        # Initialize slice nodes if not already done
-        layoutManager = slicer.app.layoutManager()
-        for color in ['Red', 'Yellow', 'Green']:
-            if color not in self.sliceNodes:
+            # Initialize slice nodes
+            layoutManager = slicer.app.layoutManager()
+            if not layoutManager:
+                return
+                
+            for color in ['Red', 'Yellow', 'Green']:
                 sliceWidget = layoutManager.sliceWidget(color)
                 if sliceWidget:
                     self.sliceNodes[color] = sliceWidget.mrmlSliceNode()
-                    # Link slice node to clip node
-                    self.clippingNode.AddObserver(vtk.vtkCommand.ModifiedEvent, 
-                                                lambda caller, event: self.updateSlicePositions())
-        
-        # Update initial slice positions
-        self.updateSlicePositions()
+            
+            # Update initial slice positions
+            self.updateSlicePositions()
+            
+        except Exception as e:
+            logging.error(f"Error setting up clipping: {str(e)}")
 
     def onSliceOffsetChanged(self, sliceColor, value):
         """Handle changes in slice offset sliders"""
@@ -418,6 +422,12 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         # Clean up clipping if enabled
         if self.clippingEnabled:
             self.disableClipping()
+        # Remove all observers
+        if hasattr(self, '_observers'):
+            for obj, tag in self._observers:
+                if obj is not None and tag is not None:
+                    obj.RemoveObserver(tag)
+            self._observers = []
 
     def enter(self):
         self.initializeParameterNode()
@@ -527,74 +537,95 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
 
     def onApplyButton(self):
         with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
-            # Get parameters from UI
-            inputVolumeNode = self.ui.inputVolumeSelector.currentNode()
-            outputDirectory = self.ui.outputDirectorySelector.directory
-            targetEdgeLength = self.ui.targetEdgeLengthSpinBox.value
-            outputFormat = str(self.ui.outputFormatComboBox.itemData(self.ui.outputFormatComboBox.currentIndex))
-            enableMaterialMapping = self.ui.enableMaterialMappingCheckBox.checked
-            
-            # Get segmentation node
-            segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
-            if not segmentationNodeID:
-                raise ValueError("No segmentation found")
-            segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
-            if not segmentationNode:
-                raise ValueError("Segmentation node not found")
-            
-            # Build material parameters
-            materialParams = {
-                "slope": self.ui.slopeSpinBox.value,
-                "intercept": self.ui.interceptSpinBox.value,
-                "bone_threshold": 400,  # Fixed default value from config
-                "neighborhood_radius": 2,  # Fixed default value from config
-                "resolution_level": 1  # Fixed default value from config
-            }
-            
-            # Get selected segments
-            selectedSegments = []
-            for segmentID, selected in self.segmentSelectionDict.items():
-                if selected:
-                    selectedSegments.append(segmentID)
-            
-            if not selectedSegments:
-                raise ValueError("No segments selected for processing")
-            
-            # Start processing - store any created nodes and statistics
-            createdNodes, meshStatistics, summary = self.logic.process(
-                inputVolumeNode,
-                segmentationNode,
-                selectedSegments,
-                outputDirectory,
-                targetEdgeLength,
-                outputFormat,
-                enableMaterialMapping,
-                materialParams
+            # Create progress dialog
+            progressDialog = slicer.util.createProgressDialog(
+                windowTitle="Generating Meshes",
+                labelText="Initializing...",
+                maximum=100,
+                parent=slicer.util.mainWindow()
             )
+            progressDialog.minimumDuration = 0
+            progressDialog.setValue(0)
+            progressDialog.setAutoClose(True)
             
-            # Switch to a layout that shows the 3D view prominently
-            if createdNodes and len(createdNodes) > 0:
-                slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
+            try:
+                # Get parameters from UI
+                inputVolumeNode = self.ui.inputVolumeSelector.currentNode()
+                outputDirectory = self.ui.outputDirectorySelector.directory
+                targetEdgeLength = self.ui.targetEdgeLengthSpinBox.value
+                outputFormat = str(self.ui.outputFormatComboBox.itemData(self.ui.outputFormatComboBox.currentIndex))
+                enableMaterialMapping = self.ui.enableMaterialMappingCheckBox.checked
                 
-                # Perform 3D view reset to center on newly loaded models
-                threeDView = slicer.app.layoutManager().threeDWidget(0).threeDView()
-                threeDView.resetFocalPoint()
+                # Get segmentation node
+                segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
+                if not segmentationNodeID:
+                    raise ValueError("No segmentation found")
+                segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
+                if not segmentationNode:
+                    raise ValueError("Segmentation node not found")
                 
-                # Create a detailed message dialog with mesh statistics
-                self.showMeshStatisticsDialog(meshStatistics, summary)
+                # Build material parameters
+                materialParams = {
+                    "slope": self.ui.slopeSpinBox.value,
+                    "intercept": self.ui.interceptSpinBox.value,
+                    "bone_threshold": 400,
+                    "neighborhood_radius": 2,
+                    "resolution_level": 1
+                }
                 
-                # Show a simplified status message with totals
-                volumeModels = [node for node in createdNodes if "volume_mesh" in node.GetName()]
-                statusMessage = f"Processing complete. {len(volumeModels)} volume meshes with {summary['totalElements']} elements generated."
+                # Get selected segments
+                selectedSegments = []
+                for segmentID, selected in self.segmentSelectionDict.items():
+                    if selected:
+                        selectedSegments.append(segmentID)
                 
-                # Update model selector with newly created models
-                if volumeModels:
-                    self.ui.modelSelector.setCurrentNode(volumeModels[0])
-            else:
-                statusMessage = "Processing complete. No meshes were loaded for display."
+                if not selectedSegments:
+                    raise ValueError("No segments selected for processing")
                 
-            slicer.util.showStatusMessage(statusMessage)
-            
+                # Process segments with progress updates
+                createdNodes, meshStatistics, summary = self.logic.process(
+                    inputVolumeNode,
+                    segmentationNode,
+                    selectedSegments,
+                    outputDirectory,
+                    targetEdgeLength,
+                    outputFormat,
+                    enableMaterialMapping,
+                    materialParams,
+                    progressCallback=lambda progress, message: self.updateProgress(progressDialog, progress, message)
+                )
+                
+                # Show results dialog
+                if createdNodes and len(createdNodes) > 0:
+                    slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
+                    threeDView = slicer.app.layoutManager().threeDWidget(0).threeDView()
+                    threeDView.resetFocalPoint()
+                    
+                    # Count volume mesh nodes
+                    volumeMeshCount = sum(1 for node in createdNodes if "_volume_mesh" in node.GetName())
+                    
+                    # Show statistics dialog and status message
+                    self.showMeshStatisticsDialog(meshStatistics, summary)
+                    statusMessage = f"Processing complete. {volumeMeshCount} volume meshes with {summary['totalElements']} elements generated."
+                else:
+                    statusMessage = "Processing complete. No meshes were loaded for display."
+                
+                slicer.util.showStatusMessage(statusMessage)
+                
+            except Exception as e:
+                slicer.util.errorDisplay(f"Processing failed: {str(e)}")
+            finally:
+                progressDialog.close()
+
+    def updateProgress(self, progressDialog, progress, message):
+        """Update progress dialog with current progress and message."""
+        if progressDialog.wasCanceled:
+            raise ValueError("User canceled the operation")
+        progressDialog.setValue(int(progress))
+        if message:
+            progressDialog.labelText = message
+        slicer.app.processEvents()
+
     def showMeshStatisticsDialog(self, meshStatistics, summary):
         """
         Show a dialog with detailed mesh statistics
@@ -662,70 +693,64 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         return parameterNode
     
     def process(self, inputVolumeNode, segmentationNode, selectedSegments, outputDirectory, 
-                targetEdgeLength, outputFormat, enableMaterialMapping, materialParams):
+                targetEdgeLength, outputFormat, enableMaterialMapping, materialParams, progressCallback=None):
         """
         Process all selected segments and display the generated meshes.
-        Returns a list of nodes created for display and a dictionary of mesh statistics.
         """
         if not os.path.exists(outputDirectory):
             os.makedirs(outputDirectory)
             
         logging.info(f"Starting mesh generation process. Target edge length: {targetEdgeLength}mm")
         
-        # Keep track of all created nodes and mesh statistics
         createdNodes = []
         meshStatistics = {}
         
-        # Process each selected segment
-        for segmentID in selectedSegments:
-            volumeNode, surfaceNode, stats = self.processSegment(
-                inputVolumeNode, 
-                segmentationNode, 
-                segmentID, 
-                outputDirectory, 
-                targetEdgeLength, 
-                outputFormat,
-                enableMaterialMapping,
-                materialParams
-            )
-            
-            if volumeNode:
-                createdNodes.append(volumeNode)
-            if surfaceNode:
-                createdNodes.append(surfaceNode)
-            if stats:
-                segmentation = segmentationNode.GetSegmentation()
-                segment = segmentation.GetSegment(segmentID)
-                segmentName = segment.GetName()
-                meshStatistics[segmentName] = stats
-                
-        # Create a folder in the subject hierarchy to organize the models
-        if createdNodes:
-            try:
-                shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
-                folderItemID = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Generated Meshes")
-                
-                # Add all created nodes to this folder
-                for node in createdNodes:
-                    nodeItemID = shNode.GetItemByDataNode(node)
-                    if nodeItemID:
-                        shNode.SetItemParent(nodeItemID, folderItemID)
-                        
-                # Expand the folder in the subject hierarchy
-                meshFolderPlugin = slicer.qSlicerSubjectHierarchyFolderPlugin()
-                if meshFolderPlugin:
-                    meshFolderPlugin.setDisplayVisibility(folderItemID, 1)  # Show folder contents
-            except Exception as e:
-                logging.warning(f"Could not organize models in a folder: {str(e)}")
+        # Calculate progress steps
+        totalSteps = len(selectedSegments)
+        stepsPerSegment = 100.0 / totalSteps if totalSteps > 0 else 100.0
         
-        # Reset 3D view to show new models
-        layoutManager = slicer.app.layoutManager()
-        if layoutManager.threeDViewCount > 0:
-            threeDView = layoutManager.threeDWidget(0).threeDView()
-            threeDView.resetFocalPoint()
-            threeDView.resetCamera()
-            
-        # Calculate summary statistics for all generated meshes
+        for i, segmentID in enumerate(selectedSegments):
+            try:
+                baseProgress = i * stepsPerSegment
+                segmentCallback = None
+                if progressCallback:
+                    segmentCallback = lambda progress, message: progressCallback(
+                        baseProgress + (progress * stepsPerSegment / 100.0),
+                        message
+                    )
+                
+                volumeNode, surfaceNode, stats = self.processSegment(
+                    inputVolumeNode, 
+                    segmentationNode, 
+                    segmentID, 
+                    outputDirectory, 
+                    targetEdgeLength, 
+                    outputFormat,
+                    enableMaterialMapping,
+                    materialParams,
+                    progressCallback=segmentCallback
+                )
+                
+                if volumeNode:
+                    createdNodes.append(volumeNode)
+                if surfaceNode:
+                    createdNodes.append(surfaceNode)
+                if stats:
+                    segmentation = segmentationNode.GetSegmentation()
+                    segment = segmentation.GetSegment(segmentID)
+                    segmentName = segment.GetName()
+                    meshStatistics[segmentName] = stats
+                    
+            except Exception as e:
+                logging.error(f"Error processing segment {segmentID}: {str(e)}")
+                if progressCallback:
+                    progressCallback(baseProgress + stepsPerSegment, f"Error: {str(e)}")
+                continue
+                
+            if progressCallback:
+                progressCallback(baseProgress + stepsPerSegment, f"Completed segment {i+1} of {totalSteps}")
+                
+        # Create summary statistics
         totalElements = sum(stats.get("volume_elements", 0) for stats in meshStatistics.values() if stats)
         avgEdgeLength = np.mean([stats.get("vtk_mean_edge_length", 0) for stats in meshStatistics.values() if stats and stats.get("vtk_mean_edge_length")])
         
@@ -734,21 +759,43 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             "totalElements": totalElements,
             "averageEdgeLength": avgEdgeLength
         }
-            
-        logging.info(f"Mesh generation complete. Total {totalElements} elements with average edge length {avgEdgeLength:.2f}mm")
+        
+        # Create a subject hierarchy folder for the models
+        shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+        if not shNode:
+            shNode = slicer.vtkMRMLSubjectHierarchyNode()
+            slicer.mrmlScene.AddNode(shNode)
+        
+        # Create a new folder with a unique name
+        folderName = f"Generated_Meshes_{len(createdNodes)}"
+        folderItemID = shNode.CreateFolderItem(shNode.GetSceneItemID(), folderName)
+        
+        # Add created nodes to the folder
+        for node in createdNodes:
+            if node:
+                nodeItemID = shNode.GetItemByDataNode(node)
+                if nodeItemID:
+                    shNode.SetItemParent(nodeItemID, folderItemID)
         
         return createdNodes, meshStatistics, summary
     
-    def processSegment(self, inputVolumeNode, segmentationNode, segmentID, outputDirectory, 
-                   targetEdgeLength, outputFormat, enableMaterialMapping, materialParams):
+    def processSegment(self, inputVolumeNode, segmentationNode, segmentID, outputDirectory,
+                      targetEdgeLength, outputFormat, enableMaterialMapping, materialParams,
+                      progressCallback=None):
         """
-        Process a single segment following the workflow from the configuration.
+        Process a single segment with progress reporting.
         """
+        if progressCallback:
+            progressCallback(0, "Starting segment processing...")
+        
         segmentation = segmentationNode.GetSegmentation()
         segment = segmentation.GetSegment(segmentID)
         segmentName = segment.GetName()
-        logging.info(f"Processing segment: {segmentName}")
         
+        # Create temporary segmentation
+        if progressCallback:
+            progressCallback(5, f"Preparing {segmentName} for processing...")
+            
         # Create segment output directory
         segmentOutputDir = os.path.join(outputDirectory, segmentName)
         os.makedirs(segmentOutputDir, exist_ok=True)
@@ -758,132 +805,161 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.AddNode(tempSegmentationNode)
         tempSegmentationNode.GetSegmentation().AddSegment(segment)
         
-        # Calculate volume and surface statistics
-        segmentStats = self.calculateVolumeAndSurface(inputVolumeNode, tempSegmentationNode)
-        logging.info(f"Computed Closed Surface Statistics: {segmentStats}")
-        
-        # Build file paths
-        paths = self.buildPaths(segmentOutputDir, segmentName)
-        
-        # Variables to track created nodes for display
-        generatedVolumeNode = None
-        generatedSurfaceNode = None
-        meshStats = None
-        
         try:
-            # Export segmentation to model
+            # Calculate statistics
+            if progressCallback:
+                progressCallback(10, "Calculating segment statistics...")
+            segmentStats = self.calculateVolumeAndSurface(inputVolumeNode, tempSegmentationNode)
+            
+            # Export to model
+            if progressCallback:
+                progressCallback(20, "Converting segment to model...")
             modelNode = self.exportSegmentationToModel(tempSegmentationNode)
             
-            # ---------- ADD EDGE LENGTH OPTIMIZATION HERE ----------
-            # Run optimization to find optimal pointSurfaceRatio and GMSH size
-            optimizationResult = self.optimizeEdgeLength(
-                modelNode, 
-                segmentStats["SurfaceArea_mm2"],
-                targetEdgeLength, 
-                0.05,  # Use 5% tolerance as in original pipeline
-                20     # Max iterations
-            )
+            # Optimize mesh parameters
+            if progressCallback:
+                progressCallback(30, "Optimizing mesh parameters...")
+            optimizationResult = self.optimizeEdgeLength(modelNode, segmentStats["SurfaceArea_mm2"],
+                                                       targetEdgeLength, 0.05, 20)
             
-            if optimizationResult:
-                pointSurfaceRatio = optimizationResult['ratio']
-                gmshSize = optimizationResult['gmsh_size']
-                logging.info(f"Using optimized parameters: ratio={pointSurfaceRatio:.4f}, gmsh_size={gmshSize:.4f}mm")
-            else:
-                # Fallback to defaults if optimization fails
-                pointSurfaceRatio = 1.62  # Default from pipeline
-                gmshSize = targetEdgeLength
-                logging.info(f"Optimization failed, using defaults: ratio={pointSurfaceRatio}, gmsh_size={gmshSize}mm")
+            # Generate surface mesh
+            if progressCallback:
+                progressCallback(50, "Generating surface mesh...")
+            # Build file paths
+            paths = self.buildPaths(segmentOutputDir, segmentName)
+            
+            # Variables to track created nodes for display
+            generatedVolumeNode = None
+            generatedSurfaceNode = None
+            meshStats = None
+            
+            try:
+                # Export segmentation to model
+                modelNode = self.exportSegmentationToModel(tempSegmentationNode)
                 
-            # Calculate number of points based on optimized ratio
-            numberPoints = self.calculateSurfaceNumberPoints(segmentStats["SurfaceArea_mm2"], pointSurfaceRatio)
-            logging.info(f"Target number of points: {numberPoints}")
-            
-            # Create uniform remesh with calculated number of points
-            outputModelNode = self.createUniformRemesh(
-                modelNode, 
-                clusterK=round(numberPoints / 1000.0, 1)  # Round to 1 decimal as in the config
-            )
-            
-            # Save surface mesh
-            slicer.util.saveNode(outputModelNode, paths["surface_mesh_path"])
-            logging.info(f"Surface mesh saved to {paths['surface_mesh_path']}")
-            
-            # Generate volume mesh with optimized GMSH size
-            volume_mesh_path = self.generateVolumeMesh(outputModelNode, paths, gmshSize)
-            
-            # Calculate material properties if enabled
-            if enableMaterialMapping:
-                self.calculateMaterialProperties(
-                    paths["volume_mesh_path"], 
-                    inputVolumeNode.GetID(), 
-                    paths["element_properties_path"],
-                    materialParams
+                # ---------- ADD EDGE LENGTH OPTIMIZATION HERE ----------
+                # Run optimization to find optimal pointSurfaceRatio and GMSH size
+                optimizationResult = self.optimizeEdgeLength(
+                    modelNode, 
+                    segmentStats["SurfaceArea_mm2"],
+                    targetEdgeLength, 
+                    0.05,  # Use 5% tolerance as in original pipeline
+                    20     # Max iterations
                 )
-            
-            # Calculate expanded mesh statistics (more comprehensive than before)
-            meshStats = self.calculateMeshStatistics(
-                paths["surface_mesh_path"],
-                paths["volume_mesh_path"],
-                paths["statistics_path"],
-                segmentName,
-                segmentStats,
-                pointSurfaceRatio,
-                numberPoints
-            )
-            
-            # Generate additional output formats if requested
-            if outputFormat == "summit" or outputFormat == "all":
-                self.generateSummitFile(
+                
+                if optimizationResult:
+                    pointSurfaceRatio = optimizationResult['ratio']
+                    gmshSize = optimizationResult['gmsh_size']
+                    logging.info(f"Using optimized parameters: ratio={pointSurfaceRatio:.4f}, gmsh_size={gmshSize:.4f}mm")
+                else:
+                    # Fallback to defaults if optimization fails
+                    pointSurfaceRatio = 1.62  # Default from pipeline
+                    gmshSize = targetEdgeLength
+                    logging.info(f"Optimization failed, using defaults: ratio={pointSurfaceRatio}, gmsh_size={gmshSize}mm")
+                    
+                # Calculate number of points based on optimized ratio
+                numberPoints = self.calculateSurfaceNumberPoints(segmentStats["SurfaceArea_mm2"], pointSurfaceRatio)
+                logging.info(f"Target number of points: {numberPoints}")
+                
+                # Create uniform remesh with calculated number of points
+                outputModelNode = self.createUniformRemesh(
+                    modelNode, 
+                    clusterK=round(numberPoints / 1000.0, 1)  # Round to 1 decimal as in the config
+                )
+                
+                # Save surface mesh
+                slicer.util.saveNode(outputModelNode, paths["surface_mesh_path"])
+                logging.info(f"Surface mesh saved to {paths['surface_mesh_path']}")
+                
+                # Generate volume mesh with optimized GMSH size
+                volume_mesh_path = self.generateVolumeMesh(outputModelNode, paths, gmshSize)
+                
+                # Calculate material properties if enabled
+                if enableMaterialMapping:
+                    self.calculateMaterialProperties(
+                        paths["volume_mesh_path"], 
+                        inputVolumeNode.GetID(), 
+                        paths["element_properties_path"],
+                        materialParams
+                    )
+                
+                # Calculate expanded mesh statistics (more comprehensive than before)
+                meshStats = self.calculateMeshStatistics(
+                    paths["surface_mesh_path"],
                     paths["volume_mesh_path"],
-                    paths["element_properties_path"] if enableMaterialMapping else None,
-                    os.path.join(segmentOutputDir, f"{segmentName}_mesh.summit"),
-                    enableMaterialMapping
+                    paths["statistics_path"],
+                    segmentName,
+                    segmentStats,
+                    pointSurfaceRatio,
+                    numberPoints
                 )
-            
-            # Load the volume mesh for display - this is the key addition
-            generatedVolumeNode = slicer.util.loadModel(paths["volume_mesh_path"])
-            # Update the name to include element count and edge length info
-            volumeElementCount = meshStats.get("volume_elements", 0)
-            volumeEdgeLength = meshStats.get("vtk_mean_edge_length", 0.0)
-            generatedVolumeNode.SetName(f"{segmentName}_volume_mesh ({volumeElementCount} elements, {volumeEdgeLength:.2f}mm avg edge)")
-            
-            # Set volume mesh display properties for better visualization
-            displayNode = generatedVolumeNode.GetDisplayNode()
-            if displayNode:
-                displayNode.SetColor(0.9, 0.8, 0.1)  # Yellow-gold color
-                displayNode.SetOpacity(0.7)  # Semi-transparent
-                displayNode.SetEdgeVisibility(True)  # Show edges
-                displayNode.SetSliceIntersectionVisibility(True)  # Show in slice views
-                displayNode.SetLineWidth(1.0)
-            
-            # Also load the surface mesh for comparison if needed
-            generatedSurfaceNode = slicer.util.loadModel(paths["surface_mesh_path"])
-            surfaceTriangleCount = meshStats.get("surface_triangles", 0)
-            surfaceEdgeLength = meshStats.get("stl_mean_edge_length", 0.0)
-            generatedSurfaceNode.SetName(f"{segmentName}_surface_mesh ({surfaceTriangleCount} triangles, {surfaceEdgeLength:.2f}mm avg edge)")
-            
-            # Set surface mesh display properties
-            surfaceDisplayNode = generatedSurfaceNode.GetDisplayNode()
-            if surfaceDisplayNode:
-                surfaceDisplayNode.SetColor(0.2, 0.6, 0.8)  # Blue color
-                surfaceDisplayNode.SetOpacity(0.3)  # More transparent
-                surfaceDisplayNode.SetVisibility(False)  # Initially hidden but available
-            
-            logging.info(f"Segment {segmentName} processed successfully and meshes loaded for display")
+                
+                # Generate additional output formats if requested
+                if outputFormat == "summit" or outputFormat == "all":
+                    self.generateSummitFile(
+                        paths["volume_mesh_path"],
+                        paths["element_properties_path"] if enableMaterialMapping else None,
+                        os.path.join(segmentOutputDir, f"{segmentName}_mesh.summit"),
+                        enableMaterialMapping
+                    )
+                
+                # Load the volume mesh for display - this is the key addition
+                generatedVolumeNode = slicer.util.loadModel(paths["volume_mesh_path"])
+                # Update the name to include element count and edge length info
+                volumeElementCount = meshStats.get("volume_elements", 0)
+                volumeEdgeLength = meshStats.get("vtk_mean_edge_length", 0.0)
+                generatedVolumeNode.SetName(f"{segmentName}_volume_mesh ({volumeElementCount} elements, {volumeEdgeLength:.2f}mm avg edge)")
+                
+                # Set volume mesh display properties for better visualization
+                displayNode = generatedVolumeNode.GetDisplayNode()
+                if displayNode:
+                    displayNode.SetColor(0.9, 0.8, 0.1)  # Yellow-gold color
+                    displayNode.SetOpacity(0.7)  # Semi-transparent
+                    displayNode.SetEdgeVisibility(True)  # Show edges
+                    displayNode.SetSliceIntersectionVisibility(True)  # Show in slice views
+                    displayNode.SetLineWidth(1.0)
+                
+                # Also load the surface mesh for comparison if needed
+                generatedSurfaceNode = slicer.util.loadModel(paths["surface_mesh_path"])
+                surfaceTriangleCount = meshStats.get("surface_triangles", 0)
+                surfaceEdgeLength = meshStats.get("stl_mean_edge_length", 0.0)
+                generatedSurfaceNode.SetName(f"{segmentName}_surface_mesh ({surfaceTriangleCount} triangles, {surfaceEdgeLength:.2f}mm avg edge)")
+                
+                # Set surface mesh display properties
+                surfaceDisplayNode = generatedSurfaceNode.GetDisplayNode()
+                if surfaceDisplayNode:
+                    surfaceDisplayNode.SetColor(0.2, 0.6, 0.8)  # Blue color
+                    surfaceDisplayNode.SetOpacity(0.3)  # More transparent
+                    surfaceDisplayNode.SetVisibility(False)  # Initially hidden but available
+                
+                logging.info(f"Segment {segmentName} processed successfully and meshes loaded for display")
+                
+            except Exception as e:
+                logging.error(f"Error processing segment {segmentName}: {str(e)}")
+                raise
+            finally:
+                # Clean up temporary nodes but keep the generated display nodes
+                slicer.mrmlScene.RemoveNode(tempSegmentationNode)
+                if 'modelNode' in locals() and modelNode:
+                    slicer.mrmlScene.RemoveNode(modelNode)
+                if 'outputModelNode' in locals() and outputModelNode:
+                    slicer.mrmlScene.RemoveNode(outputModelNode)
+                
+            # Return the created nodes and stats so they can be tracked
+            return generatedVolumeNode, generatedSurfaceNode, meshStats
             
         except Exception as e:
             logging.error(f"Error processing segment {segmentName}: {str(e)}")
             raise
         finally:
-            # Clean up temporary nodes but keep the generated display nodes
+            # Cleanup
+            if progressCallback:
+                progressCallback(100, "Cleaning up...")
             slicer.mrmlScene.RemoveNode(tempSegmentationNode)
             if 'modelNode' in locals() and modelNode:
                 slicer.mrmlScene.RemoveNode(modelNode)
             if 'outputModelNode' in locals() and outputModelNode:
                 slicer.mrmlScene.RemoveNode(outputModelNode)
-            
-        # Return the created nodes and stats so they can be tracked
-        return generatedVolumeNode, generatedSurfaceNode, meshStats
 
     def optimizeEdgeLength(self, modelNode, surfaceArea, targetEdgeLength, tolerance=0.05, maxIterations=20):
         """
@@ -1301,23 +1377,39 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         """
         import meshio
         
-        mesh = meshio.read(inputFilepath)
-        newCells = []
-        newCellData = {key: [] for key in mesh.cell_data} if mesh.cell_data else None
-        
-        for i, cellBlock in enumerate(mesh.cells):
-            if cellBlock.type != "triangle":
-                newCells.append(cellBlock)
-                if newCellData is not None:
-                    for key in mesh.cell_data:
-                        newCellData[key].append(mesh.cell_data[key][i])
-        
-        mesh.cells = newCells
-        if newCellData is not None:
-            mesh.cell_data = newCellData
-        
-        mesh.cell_sets = {}  # remove cell sets to avoid writer errors
-        return mesh
+        try:
+            mesh = meshio.read(inputFilepath)
+            if isinstance(mesh, str):
+                raise ValueError(f"Failed to read mesh from {inputFilepath}")
+                
+            newCells = []
+            newCellData = {}
+            
+            # Initialize cell data if it exists
+            if hasattr(mesh, 'cell_data') and mesh.cell_data:
+                newCellData = {key: [] for key in mesh.cell_data.keys()}
+            
+            # Filter out triangles
+            for i, cellBlock in enumerate(mesh.cells):
+                if cellBlock.type != "triangle":
+                    newCells.append(cellBlock)
+                    if newCellData and i < len(list(mesh.cell_data.values())[0]):
+                        for key in newCellData:
+                            newCellData[key].append(mesh.cell_data[key][i])
+            
+            # Create new mesh without triangles
+            newMesh = meshio.Mesh(
+                points=mesh.points,
+                cells=newCells,
+                cell_data=newCellData if newCellData else None,
+                point_data=mesh.point_data if hasattr(mesh, 'point_data') else None,
+                field_data=mesh.field_data if hasattr(mesh, 'field_data') else None
+            )
+            return newMesh
+            
+        except Exception as e:
+            logging.error(f"Error removing triangles from mesh: {str(e)}")
+            raise
 
     def analyzeMeshQuality(self, modelNode):
         """
@@ -2007,6 +2099,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         """
         script_content = """import sys
 import gmsh
+import numpy as np
 
 def generate_mesh():
     if len(sys.argv) < 3:
@@ -2022,28 +2115,41 @@ def generate_mesh():
     print(f"Merging STL file: {input_stl}")
     gmsh.merge(input_stl)
     
+    # Get entities and ensure they are 3D
     entities = gmsh.model.getEntities(dim=2)
     if not entities:
         print("No surfaces found.")
         gmsh.finalize()
         sys.exit(1)
     
-    surface_tags = [entity[1] for entity in entities]
-    loop = gmsh.model.geo.addSurfaceLoop(surface_tags)
-    volume = gmsh.model.geo.addVolume([loop])
-    gmsh.model.geo.synchronize()
+    # Convert 2D tags to 3D if needed
+    surface_tags = []
+    for entity in entities:
+        tag = entity[1]
+        if isinstance(tag, (list, tuple)) and len(tag) == 2:
+            tag = np.array([tag[0], tag[1], 0])  # Append Z component
+        surface_tags.append(tag)
     
-    # Set mesh size parameters
-    gmsh.option.setNumber('Mesh.MeshSizeMin', size_param)
-    gmsh.option.setNumber('Mesh.MeshSizeMax', size_param)
-    
-    # Generate 3D mesh
-    gmsh.model.mesh.generate(3)
-    
-    # Write output
-    gmsh.write(output_msh)
-    gmsh.finalize()
-    print(f"Mesh generation complete. Saved to: {output_msh}")
+    try:
+        loop = gmsh.model.geo.addSurfaceLoop(surface_tags)
+        volume = gmsh.model.geo.addVolume([loop])
+        gmsh.model.geo.synchronize()
+        
+        # Set mesh size parameters
+        gmsh.option.setNumber('Mesh.MeshSizeMin', size_param)
+        gmsh.option.setNumber('Mesh.MeshSizeMax', size_param)
+        gmsh.option.setNumber('Mesh.Algorithm3D', 1)  # Delaunay algorithm
+        
+        # Generate 3D mesh
+        gmsh.model.mesh.generate(3)
+        
+        # Write output
+        gmsh.write(output_msh)
+    except Exception as e:
+        print(f"Error during mesh generation: {str(e)}")
+    finally:
+        gmsh.finalize()
+        print(f"Mesh generation complete. Saved to: {output_msh}")
 
 if __name__ == "__main__":
     generate_mesh()
