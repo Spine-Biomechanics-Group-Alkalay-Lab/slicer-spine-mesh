@@ -298,7 +298,31 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
 
     def onVolumeSelected(self):
         self.updateParameterNodeFromGUI()
-        self.updateSegmentTable()
+        self.updateSegmentTable()        
+        selectedVolumeNode = self.ui.inputVolumeSelector.currentNode()
+        volumeNodes = slicer.util.getNodesByClass("vtkMRMLScalarVolumeNode")
+        
+        # Hide all volume nodes
+        for volumeNode in volumeNodes:
+            if volumeNode.GetDisplayNode():
+                volumeNode.GetDisplayNode().SetVisibility(False)
+        
+        # Show only the selected volume
+        if selectedVolumeNode and selectedVolumeNode.GetDisplayNode():
+            selectedVolumeNode.GetDisplayNode().SetVisibility(True)
+            
+            # Update all slice viewers to show the selected volume
+            layoutManager = slicer.app.layoutManager()
+            if layoutManager:
+                sliceViewNames = ["Red", "Yellow", "Green"]
+                for sliceName in sliceViewNames:
+                    sliceWidget = layoutManager.sliceWidget(sliceName)
+                    if sliceWidget:
+                        sliceWidget.sliceLogic().GetSliceCompositeNode().SetBackgroundVolumeID(selectedVolumeNode.GetID())
+                        sliceWidget.sliceLogic().FitSliceToAll()
+        
+            # Reset 3D view focal point
+            layoutManager.threeDWidget(0).threeDView().resetFocalPoint()
 
     def onMaterialMappingToggled(self, enabled):
         self.ui.materialMappingGroupBox.setVisible(enabled)
