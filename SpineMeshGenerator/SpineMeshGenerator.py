@@ -1089,7 +1089,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         if not os.path.exists(outputDirectory):
             os.makedirs(outputDirectory)
             
-        logging.info(f"Starting mesh generation process. Target edge length: {targetEdgeLength}mm")
+        logging.error(f"Starting mesh generation process. Target edge length: {targetEdgeLength}mm")
         
         createdNodes = []
         meshStatistics = {}
@@ -1239,16 +1239,16 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 if optimizationResult:
                     pointSurfaceRatio = optimizationResult['ratio']
                     gmshSize = optimizationResult['gmsh_size']
-                    logging.info(f"Using optimized parameters: ratio={pointSurfaceRatio:.4f}, gmsh_size={gmshSize:.4f}mm")
+                    logging.error(f"Using optimized parameters: ratio={pointSurfaceRatio:.4f}, gmsh_size={gmshSize:.4f}mm")
                 else:
                     # Fallback to defaults if optimization fails
                     pointSurfaceRatio = 1.62  # Default from pipeline
                     gmshSize = targetEdgeLength
-                    logging.info(f"Optimization failed, using defaults: ratio={pointSurfaceRatio}, gmsh_size={gmshSize}mm")
+                    logging.error(f"Optimization failed, using defaults: ratio={pointSurfaceRatio}, gmsh_size={gmshSize}mm")
                     
                 # Calculate number of points based on optimized ratio
                 numberPoints = self.calculateSurfaceNumberPoints(segmentStats["SurfaceArea_mm2"], pointSurfaceRatio)
-                logging.info(f"Target number of points: {numberPoints}")
+                logging.error(f"Target number of points: {numberPoints}")
                 
                 # Create uniform remesh with calculated number of points
                 outputModelNode = self.createUniformRemesh(
@@ -1258,7 +1258,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 
                 # Save surface mesh
                 slicer.util.saveNode(outputModelNode, paths["surface_mesh_path"])
-                logging.info(f"Surface mesh saved to {paths['surface_mesh_path']}")
+                logging.error(f"Surface mesh saved to {paths['surface_mesh_path']}")
                 
                 # Generate volume mesh with optimized GMSH size
                 volume_mesh_path = self.generateVolumeMesh(outputModelNode, paths, gmshSize)
@@ -1321,7 +1321,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                     surfaceDisplayNode.SetOpacity(0.3)  # More transparent
                     surfaceDisplayNode.SetVisibility(False)  # Initially hidden but available
                 
-                logging.info(f"Segment {segmentName} processed successfully and meshes loaded for display")
+                logging.error(f"Segment {segmentName} processed successfully and meshes loaded for display")
                 
             except Exception as e:
                 logging.error(f"Error processing segment {segmentName}: {str(e)}")
@@ -1376,8 +1376,8 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             targetMin = targetEdgeLength * (1 - tolerance)
             targetMax = targetEdgeLength * (1 + tolerance)
             
-            logging.info(f"Optimizing mesh for edge length {targetEdgeLength}mm")
-            logging.info(f"Tolerance: ±{tolerance*100:.1f}% ({targetMin:.4f}mm to {targetMax:.4f}mm)")
+            logging.error(f"Optimizing mesh for edge length {targetEdgeLength}mm")
+            logging.error(f"Tolerance: ±{tolerance*100:.1f}% ({targetMin:.4f}mm to {targetMax:.4f}mm)")
             
             # Store evaluation results
             surfaceEvaluations = []
@@ -1391,7 +1391,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 # Calculate number of points
                 numberPoints = self.calculateSurfaceNumberPoints(surfaceArea, ratio)
                 
-                logging.info(f"Testing ratio = {ratio:.4f} ({numberPoints:.0f} points)")
+                logging.error(f"Testing ratio = {ratio:.4f} ({numberPoints:.0f} points)")
                 
                 # Perform remeshing for surface
                 outputName = f"OptimizationOutput_{len(surfaceEvaluations)+1}"
@@ -1427,7 +1427,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                     'stl_path': tempStl
                 })
                 
-                logging.info(f"  → Surface edge length = {surfaceEdgeLength:.4f}mm (target: {targetEdgeLength:.4f}mm)")
+                logging.error(f"  → Surface edge length = {surfaceEdgeLength:.4f}mm (target: {targetEdgeLength:.4f}mm)")
                 
                 # Keep best model node 
                 if len(surfaceEvaluations) == 1 or abs(surfaceEdgeLength - targetEdgeLength) < surfaceEvaluations[-2]['diff']:
@@ -1443,7 +1443,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             minRatio = max(0.1, initialRatio * 0.25)
             maxRatio = min(20.0, initialRatio * 4.0)
             
-            logging.info(f"Starting surface optimization with initial ratio = {initialRatio:.4f}")
+            logging.error(f"Starting surface optimization with initial ratio = {initialRatio:.4f}")
             
             # --- SURFACE OPTIMIZATION ---
             try:
@@ -1452,7 +1452,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 
                 # If within tolerance, we're done with surface optimization
                 if abs(initialResult) <= tolerance * targetEdgeLength:
-                    logging.info(f"Initial ratio {initialRatio:.4f} already within tolerance!")
+                    logging.error(f"Initial ratio {initialRatio:.4f} already within tolerance!")
                     bestSurfaceEval = surfaceEvaluations[0]
                 else:
                     # Need to optimize - bracket the solution
@@ -1472,10 +1472,10 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                             full_output=True
                         )
                         
-                        logging.info(f"Surface optimizer converged in {result[1].iterations} iterations")
+                        logging.error(f"Surface optimizer converged in {result[1].iterations} iterations")
                     except Exception as e:
-                        logging.warning(f"Surface optimization did not fully converge: {e}")
-                        logging.info("Using best result found so far")
+                        logging.error(f"Surface optimization did not fully converge: {e}")
+                        logging.error("Using best result found so far")
                     
                     # Get best surface eval
                     bestSurfaceEval = min(surfaceEvaluations, key=lambda x: abs(x['edge_length'] - targetEdgeLength))
@@ -1488,16 +1488,16 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 
                 # Verify the STL file exists and is accessible
                 if not os.path.exists(bestStlPath) or os.path.getsize(bestStlPath) == 0:
-                    logging.warning(f"Best STL file not found or empty: {bestStlPath}")
-                    logging.info("Creating a new STL file from the best model...")
+                    logging.error(f"Best STL file not found or empty: {bestStlPath}")
+                    logging.error("Creating a new STL file from the best model...")
                     
                     # Create a new STL file in a temp directory
                     tempDir = tempfile.mkdtemp()
                     bestStlPath = os.path.join(tempDir, "best_surface.stl")
                     slicer.util.saveNode(bestModelNode, bestStlPath)
-                    logging.info(f"Created new STL file: {bestStlPath}")
+                    logging.error(f"Created new STL file: {bestStlPath}")
                 
-                logging.info(f"Best surface mesh: ratio={bestRatio:.4f}, edge_length={bestSurfaceEdgeLength:.4f}mm")
+                logging.error(f"Best surface mesh: ratio={bestRatio:.4f}, edge_length={bestSurfaceEdgeLength:.4f}mm")
                 
                 # --- VOLUME OPTIMIZATION ---
                 # For volume optimization, we'll use the GMSH approach
@@ -1521,7 +1521,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                     """Evaluate volume mesh edge length for a given GMSH size parameter"""
                     nonlocal volumeEvaluations, bestVtkPath
                     
-                    logging.info(f"Testing GMSH size = {gmshSize:.4f}mm")
+                    logging.error(f"Testing GMSH size = {gmshSize:.4f}mm")
                     
                     # Create temporary directory for volume mesh generation
                     tempDir = tempfile.mkdtemp()
@@ -1546,11 +1546,11 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                         
                         # Run with the clean environment
                         subprocess.check_call(cmd, env=cleanEnv)
-                        logging.info(f"GMSH successfully generated mesh: {tempMsh}")
+                        logging.error(f"GMSH successfully generated mesh: {tempMsh}")
                         
                         # Verify the output mesh was created
                         if not os.path.exists(tempMsh) or os.path.getsize(tempMsh) == 0:
-                            logging.warning(f"GMSH did not create a valid mesh file at {tempMsh}")
+                            logging.error(f"GMSH did not create a valid mesh file at {tempMsh}")
                             return float('inf')  # Return large error value
                         
                         # Convert to VTK and measure edge length
@@ -1568,7 +1568,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                             'vtk_path': tempVtk
                         })
                         
-                        logging.info(f"  → Volume edge length = {volumeEdgeLength:.4f}mm (target: {targetEdgeLength:.4f}mm)")
+                        logging.error(f"  → Volume edge length = {volumeEdgeLength:.4f}mm (target: {targetEdgeLength:.4f}mm)")
                         
                         # Keep best VTK path
                         if len(volumeEvaluations) == 1 or abs(volumeEdgeLength - targetEdgeLength) < volumeEvaluations[-2]['diff']:
@@ -1593,7 +1593,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 if volumeEvaluations:  # Check that we got at least one successful evaluation
                     # If within tolerance, we're done
                     if abs(initialVolumeResult) <= tolerance * targetEdgeLength:
-                        logging.info(f"Initial GMSH size {initialGmshSize:.4f}mm already within tolerance!")
+                        logging.error(f"Initial GMSH size {initialGmshSize:.4f}mm already within tolerance!")
                         bestVolumeEval = volumeEvaluations[0]
                     else:
                         # Need to optimize - bracket the solution
@@ -1613,10 +1613,10 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                                 full_output=True
                             )
                             
-                            logging.info(f"Volume optimizer converged in {result[1].iterations} iterations")
+                            logging.error(f"Volume optimizer converged in {result[1].iterations} iterations")
                         except Exception as e:
-                            logging.warning(f"Volume optimization did not fully converge: {e}")
-                            logging.info("Using best result found so far")
+                            logging.error(f"Volume optimization did not fully converge: {e}")
+                            logging.error("Using best result found so far")
                         
                         # Get best volume eval if we have any successful evaluations
                         if volumeEvaluations:
@@ -1625,42 +1625,42 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                             bestVolumeEdgeLength = bestVolumeEval['edge_length']
                             volumeWithinTolerance = targetMin <= bestVolumeEdgeLength <= targetMax
                         else:
-                            logging.info("No successful volume mesh evaluations. Using target as GMSH size.")
+                            logging.error("No successful volume mesh evaluations. Using target as GMSH size.")
                 else:
-                    logging.warning("Volume optimization failed. Using target edge length as GMSH size.")
+                    logging.error("Volume optimization failed. Using target edge length as GMSH size.")
             
                 # Print final results
-                logging.info("--- OPTIMIZATION RESULTS ---")
-                logging.info(f"Best surface mesh (ratio={bestRatio:.4f}):")
-                logging.info(f"  - Edge length: {bestSurfaceEdgeLength:.4f}mm")
-                logging.info(f"  - Target: {targetEdgeLength:.4f}mm")
-                logging.info(f"  - Difference: {abs(bestSurfaceEdgeLength - targetEdgeLength):.4f}mm")
+                logging.error("--- OPTIMIZATION RESULTS ---")
+                logging.error(f"Best surface mesh (ratio={bestRatio:.4f}):")
+                logging.error(f"  - Edge length: {bestSurfaceEdgeLength:.4f}mm")
+                logging.error(f"  - Target: {targetEdgeLength:.4f}mm")
+                logging.error(f"  - Difference: {abs(bestSurfaceEdgeLength - targetEdgeLength):.4f}mm")
                 
-                logging.info(f"Volume mesh (GMSH size={bestGmshSize:.4f}mm):")
+                logging.error(f"Volume mesh (GMSH size={bestGmshSize:.4f}mm):")
                 if bestVolumeEdgeLength is not None:
-                    logging.info(f"  - Edge length: {bestVolumeEdgeLength:.4f}mm")
-                    logging.info(f"  - Difference: {abs(bestVolumeEdgeLength - targetEdgeLength):.4f}mm")
+                    logging.error(f"  - Edge length: {bestVolumeEdgeLength:.4f}mm")
+                    logging.error(f"  - Difference: {abs(bestVolumeEdgeLength - targetEdgeLength):.4f}mm")
                 else:
-                    logging.info("  - Edge length: Unknown (GMSH optimization failed)")
-                    logging.info("  - Using target edge length as GMSH size")
+                    logging.error("  - Edge length: Unknown (GMSH optimization failed)")
+                    logging.error("  - Using target edge length as GMSH size")
                 
                 # Check if within tolerance
                 surfaceWithinTolerance = targetMin <= bestSurfaceEdgeLength <= targetMax
                 
                 if surfaceWithinTolerance and volumeWithinTolerance:
-                    logging.info("Both meshes achieved target edge length within tolerance!")
+                    logging.error("Both meshes achieved target edge length within tolerance!")
                 elif surfaceWithinTolerance:
                     if bestVolumeEdgeLength is not None:
-                        logging.info("Surface mesh within tolerance, but volume mesh outside tolerance")
+                        logging.error("Surface mesh within tolerance, but volume mesh outside tolerance")
                     else:
-                        logging.info("Surface mesh within tolerance (volume mesh not evaluated)")
+                        logging.error("Surface mesh within tolerance (volume mesh not evaluated)")
                 elif volumeWithinTolerance:
-                    logging.info("Volume mesh within tolerance, but surface mesh outside tolerance")
+                    logging.error("Volume mesh within tolerance, but surface mesh outside tolerance")
                 else:
                     if bestVolumeEdgeLength is not None:
-                        logging.info("Neither mesh achieved target edge length within tolerance")
+                        logging.error("Neither mesh achieved target edge length within tolerance")
                     else:
-                        logging.info("Surface mesh outside tolerance (volume mesh not evaluated)")
+                        logging.error("Surface mesh outside tolerance (volume mesh not evaluated)")
                 
                 # Return optimization results
                 return {
@@ -1677,7 +1677,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 
             except Exception as e:
                 logging.error(f"Optimization error: {str(e)}")
-                logging.info("Falling back to best result found so far")
+                logging.error("Falling back to best result found so far")
                 
                 if surfaceEvaluations:
                     bestEval = min(surfaceEvaluations, key=lambda x: abs(x['edge_length'] - targetEdgeLength))
@@ -1763,25 +1763,34 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
     def removeMeshTriangles(self, inputFilepath):
         """
         Load mesh and remove triangles, returning the modified mesh object.
+        Handles both string paths and mesh objects as input.
         """
         import meshio
         
         try:
-            mesh = meshio.read(inputFilepath)
-            if isinstance(mesh, str):
-                raise ValueError(f"Failed to read mesh from {inputFilepath}")
+            # Handle both string paths and mesh objects
+            if isinstance(inputFilepath, str):
+                mesh = meshio.read(inputFilepath)
+            else:
+                mesh = inputFilepath
+                
+            if not mesh or not hasattr(mesh, 'points'):
+                raise ValueError(f"Invalid mesh data from {inputFilepath}")
                 
             newCells = []
             newCellData = {}
             
-            # Initialize cell data if it exists
-            if hasattr(mesh, 'cell_data') and mesh.cell_data:
-                newCellData = {key: [] for key in mesh.cell_data.keys()}
+            # Get existing cell data keys if any exist
+            if hasattr(mesh, 'cell_data'):
+                cell_data_keys = list(mesh.cell_data.keys()) if mesh.cell_data else []
+                for key in cell_data_keys:
+                    newCellData[key] = []
             
-            # Filter out triangles
+            # Filter out triangles and keep other elements
             for i, cellBlock in enumerate(mesh.cells):
                 if cellBlock.type != "triangle":
                     newCells.append(cellBlock)
+                    # Copy corresponding cell data if it exists
                     if newCellData and i < len(list(mesh.cell_data.values())[0]):
                         for key in newCellData:
                             newCellData[key].append(mesh.cell_data[key][i])
@@ -1794,11 +1803,26 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 point_data=mesh.point_data if hasattr(mesh, 'point_data') else None,
                 field_data=mesh.field_data if hasattr(mesh, 'field_data') else None
             )
+            
+            # Verify the new mesh has elements
+            if not newCells:
+                logging.error("Warning: No tetrahedral elements found in the mesh")
+            else:
+                logging.error(f"Successfully removed triangles. Remaining elements: {len(newCells)}")
+                
             return newMesh
             
         except Exception as e:
-            logging.error(f"Error removing triangles from mesh: {str(e)}")
-            raise
+            logging.error(f"Error in removeMeshTriangles: {str(e)}")
+            logging.error(f"Input filepath: {inputFilepath}")
+            logging.error(f"Input type: {type(inputFilepath)}")
+            # Return input mesh as fallback
+            if isinstance(inputFilepath, meshio.Mesh):
+                return inputFilepath
+            try:
+                return meshio.read(inputFilepath)
+            except:
+                raise ValueError(f"Could not process mesh: {str(e)}")
 
     def analyzeMeshQuality(self, modelNode):
         """
@@ -1890,9 +1914,9 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             "max_aspect_ratio": maxAspectRatio
         }
         
-        logging.info(f"Mesh quality analysis completed. {numElements} elements analyzed.")
-        logging.info(f"Average aspect ratio: {avgAspectRatio:.3f}, Max: {maxAspectRatio:.3f}")
-        logging.info(f"Poor elements (ratio > 5): {poorElements} ({poorElementsPercent:.2f}%)")
+        logging.error(f"Mesh quality analysis completed. {numElements} elements analyzed.")
+        logging.error(f"Average aspect ratio: {avgAspectRatio:.3f}, Max: {maxAspectRatio:.3f}")
+        logging.error(f"Poor elements (ratio > 5): {poorElements} ({poorElementsPercent:.2f}%)")
         
         return results
 
@@ -2026,80 +2050,106 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         stl_temp = os.path.join(temp_dir, "remesh_output.stl")
         msh_temp = os.path.join(temp_dir, "volume_mesh.msh")
         
-        # Save the STL for mesh generation
-        slicer.util.saveNode(outputModelNode, stl_temp)
-        
-        # Determine script path for mesh generation
-        scriptPath = os.path.dirname(os.path.abspath(__file__))
-        gmshScriptPath = os.path.join(scriptPath, "generate_mesh.py")
-        
-        if not os.path.exists(gmshScriptPath):
-            self.createGmshScript(gmshScriptPath)
-            
-        pythonExec = sys.executable
-        cmd = [pythonExec, gmshScriptPath, stl_temp, msh_temp, str(targetEdgeLength)]
-        
-        # Use clean environment to avoid Python conflicts
-        clean_env = {k: v for k, v in os.environ.items() 
-                    if k not in ["PYTHONHOME", "PYTHONPATH", "LD_LIBRARY_PATH"]}
-        
         try:
+            # Save the STL for mesh generation
+            slicer.util.saveNode(outputModelNode, stl_temp)
+            logging.error(f"Saved temporary STL for GMSH: {stl_temp}")
+            
+            # Verify STL file
+            if not os.path.exists(stl_temp) or os.path.getsize(stl_temp) == 0:
+                raise ValueError("Failed to save valid STL file for GMSH")
+            
+            # Generate mesh using GMSH
+            scriptPath = os.path.dirname(os.path.abspath(__file__))
+            gmshScriptPath = os.path.join(scriptPath, "generate_mesh.py")
+            
+            if not os.path.exists(gmshScriptPath):
+                self.createGmshScript(gmshScriptPath)
+                
+            pythonExec = sys.executable
+            cmd = [pythonExec, gmshScriptPath, stl_temp, msh_temp, str(targetEdgeLength)]
+            
+            # Use clean environment
+            clean_env = {k: v for k, v in os.environ.items() 
+                        if k not in ["PYTHONHOME", "PYTHONPATH", "LD_LIBRARY_PATH"]}
+            
             subprocess.check_call(cmd, env=clean_env)
-            logging.info(f"GMSH successfully generated mesh: {msh_temp}")
+            logging.error(f"GMSH successfully generated mesh: {msh_temp}")
             
-            # Copy GMSH output to designated path
-            shutil.copy(msh_temp, paths["volume_mesh_gmsh_path"])
+            # Verify GMSH output
+            if not os.path.exists(msh_temp) or os.path.getsize(msh_temp) == 0:
+                raise ValueError("GMSH failed to generate valid mesh file")
             
-            # Convert to other formats and save
-            self.convertAndSaveMesh(msh_temp, paths)
-            logging.info(f"Volume mesh saved to {paths['volume_mesh_path']}")
+            # Convert and save mesh
+            volume_mesh = self.convertAndSaveMesh(msh_temp, paths)
             
+            # Verify final mesh quality
+            if volume_mesh:
+                tetra_count = sum(len(c.data) for c in volume_mesh.cells if c.type == "tetra")
+                logging.error(f"Final mesh verification: {tetra_count} tetrahedral elements")
+                
             return paths["volume_mesh_path"]
             
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Error running GMSH: {e}")
-            raise
         except Exception as e:
             logging.error(f"Error generating volume mesh: {str(e)}")
             raise
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
-    
+
     def convertAndSaveMesh(self, input_filepath, paths):
         """
         Convert GMSH mesh to other formats and save them.
         """
         import meshio
-        mesh = meshio.read(input_filepath)
-        volume_mesh = self.removeMeshTriangles(mesh)
-        meshio.write(paths["volume_mesh_path"], volume_mesh)
-        meshio.write(paths["volume_mesh_abaqus_path"], volume_mesh, file_format="abaqus")
-    
-    def removeMeshTriangles(self, mesh):
-        """
-        Remove triangles from mesh, keeping only tetrahedra.
-        Aligned with desired workflow's remove_triangles function.
-        """
-        import meshio
-        new_cells = []
-        new_cell_data = {key: [] for key in mesh.cell_data} if mesh.cell_data else None
         
-        for i, cell_block in enumerate(mesh.cells):
-            if cell_block.type != "triangle":
-                new_cells.append(cell_block)
-                if new_cell_data is not None:
-                    for key in mesh.cell_data:
-                        new_cell_data[key].append(mesh.cell_data[key][i])
-                        
-        new_mesh = meshio.Mesh(
-            points=mesh.points,
-            cells=new_cells,
-            cell_data=new_cell_data if new_cell_data else {},
-            point_data=mesh.point_data,
-            field_data=mesh.field_data
-        )
-        return new_mesh
-    
+        try:
+            # Read the input mesh
+            logging.error(f"Reading mesh from: {input_filepath}")
+            mesh = meshio.read(input_filepath)
+            
+            if not mesh or not hasattr(mesh, 'points'):
+                raise ValueError("Invalid mesh data read from file")
+            
+            # Log initial mesh statistics
+            initial_elements = sum(len(c.data) for c in mesh.cells)
+            logging.error(f"Initial mesh statistics:")
+            logging.error(f"- Points: {len(mesh.points)}")
+            logging.error(f"- Total elements: {initial_elements}")
+            
+            # Remove triangles and keep only volume elements
+            volume_mesh = self.removeMeshTriangles(mesh)
+            
+            if not volume_mesh or not hasattr(volume_mesh, 'cells') or not volume_mesh.cells:
+                raise ValueError("No volume elements found after triangle removal")
+            
+            # Verify volume mesh quality
+            tetra_count = sum(len(c.data) for c in volume_mesh.cells if c.type == "tetra")
+            logging.error(f"Volume mesh statistics:")
+            logging.error(f"- Points: {len(volume_mesh.points)}")
+            logging.error(f"- Tetrahedral elements: {tetra_count}")
+            
+            if tetra_count < 100:  # Arbitrary minimum - adjust as needed
+                raise ValueError(f"Too few tetrahedral elements ({tetra_count})")
+            
+            # Save in different formats
+            logging.error(f"Saving VTK to: {paths['volume_mesh_path']}")
+            meshio.write(paths["volume_mesh_path"], volume_mesh, file_format="vtk")
+            
+            logging.error(f"Saving Abaqus INP to: {paths['volume_mesh_abaqus_path']}")
+            meshio.write(paths["volume_mesh_abaqus_path"], volume_mesh, file_format="abaqus")
+            
+            # Verify saved files
+            for filepath in [paths["volume_mesh_path"], paths["volume_mesh_abaqus_path"]]:
+                if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+                    raise ValueError(f"Failed to save mesh to {filepath}")
+                logging.error(f"Successfully saved mesh to {filepath}")
+            
+            return volume_mesh
+            
+        except Exception as e:
+            logging.error(f"Error in convertAndSaveMesh: {str(e)}")
+            raise
+
     def calculateMaterialProperties(self, mesh_filepath, volume_node_id, output_filepath, materialParams):
         """
         Calculate material properties (BMD and BV/TV) for each tetrahedral element in the mesh.
@@ -2112,7 +2162,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         import SimpleITK as sitk
         import numpy as np
 
-        logging.info("Calculating material properties using SimpleITK-based logic...")
+        logging.error("Calculating material properties using SimpleITK-based logic...")
 
         volumeNode = slicer.mrmlScene.GetNodeByID(volume_node_id)
         if not volumeNode:
@@ -2136,8 +2186,8 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                     original_size = ct_image.GetSize()
                     new_spacing = [s / resolution_level for s in original_spacing]
                     new_size = [int(sz * resolution_level) for sz in original_size]
-                    logging.info(f"Original image size: {original_size}, spacing: {original_spacing}")
-                    logging.info(f"Resampled image size: {new_size}, spacing: {new_spacing}")
+                    logging.error(f"Original image size: {original_size}, spacing: {original_spacing}")
+                    logging.error(f"Resampled image size: {new_size}, spacing: {new_spacing}")
                     
                     resample = sitk.ResampleImageFilter()
                     resample.SetInterpolator(sitk.sitkLinear)
@@ -2216,9 +2266,9 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             
             # Log statistics
             if all_hu_values:
-                logging.info(f"HU statistics -- min: {min(all_hu_values):.2f}, max: {max(all_hu_values):.2f}, mean: {np.mean(all_hu_values):.2f}")
+                logging.error(f"HU statistics -- min: {min(all_hu_values):.2f}, max: {max(all_hu_values):.2f}, mean: {np.mean(all_hu_values):.2f}")
             else:
-                logging.info("No HU values collected from mesh.")
+                logging.error("No HU values collected from mesh.")
                 
             return element_properties
 
@@ -2236,16 +2286,16 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         bone_threshold = materialParams.get("bone_threshold", 400)
         neighborhood_radius = materialParams.get("neighborhood_radius", 2)
 
-        logging.info("Processing mesh to calculate element properties...")
+        logging.error("Processing mesh to calculate element properties...")
         element_properties = calculate_properties(mesh, ct_image, slope, intercept, bone_threshold, neighborhood_radius)
         
         if not element_properties:
             logging.error("No tetrahedral elements were processed. Check the mesh.")
             return
             
-        logging.info(f"Processed {len(element_properties)} tetrahedral elements.")
+        logging.error(f"Processed {len(element_properties)} tetrahedral elements.")
         save_results(element_properties, output_filepath)
-        logging.info(f"Material properties saved to {output_filepath}")
+        logging.error(f"Material properties saved to {output_filepath}")
     
     def calculateMeshStatistics(self, surface_mesh_path, volume_mesh_path, statistics_path, 
                                sample_id, segmentStats, pointSurfaceRatio, numberPoints):
@@ -2417,7 +2467,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
                 stats["tet_min_jacobian"]
             ])
         
-        logging.info(f"Mesh statistics saved to {statistics_path}")
+        logging.error(f"Mesh statistics saved to {statistics_path}")
         return stats
     
     def generateSummitFile(self, volume_mesh_path, element_properties_path, output_path, has_material_properties):
@@ -2545,7 +2595,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             for _ in bvtv_vector:
                 f.write(f"{density}\n")
         
-        logging.info(f"Enhanced Summit file saved to {output_path}")
+        logging.error(f"Enhanced Summit file saved to {output_path}")
 
     def generateAbaqusFile(self, volume_mesh_path, element_properties_path, output_path, load_value=1000.0):
         """
@@ -2693,7 +2743,7 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             f.write("*Output, history, variable=PRESELECT\n")
             f.write("*End Step\n")
             
-        logging.info(f"Generated Abaqus input file: {output_path}")
+        logging.error(f"Generated Abaqus input file: {output_path}")
 
     def _writeNodeSet(self, file, node_indices, nodes_per_line=8):
         """Helper function to write node sets in Abaqus format"""
@@ -2767,7 +2817,7 @@ if __name__ == "__main__":
 """
         with open(script_path, 'w') as f:
             f.write(script_content)
-        logging.info(f"Created GMSH script at {script_path}")
+        logging.error(f"Created GMSH script at {script_path}")
         return script_path
 
 # Register the module for testing
