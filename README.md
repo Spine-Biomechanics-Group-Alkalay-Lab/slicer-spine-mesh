@@ -30,8 +30,9 @@ This module automates the process of creating uniform meshes from CT scans and s
 1. Clone the repository: `git clone https://github.com/yourusername/SpineMeshGenerator.git`
 2. Open 3D Slicer
 3. Go to `Edit → Application Settings → Modules`
-4. Add the path to the cloned repository to "Additional module paths"
+4. Add the path to the cloned repository to "Additional module paths" 
 5. Restart 3D Slicer
+6. If it is not working, user should try using the child directory with the same name 'SpineMeshGenerator' as the path.
 
 ## Accessing the Module
 
