@@ -457,6 +457,88 @@
   </widget>
 </item>
    <!-- End of New Clipping Section -->
+   <!-- Add before Apply Button -->
+   <item>
+    <widget class="ctkCollapsibleButton" name="materialVisualizationCollapsibleButton">
+     <property name="text">
+      <string>Material Properties Visualization</string>
+     </property>
+     <layout class="QVBoxLayout" name="materialVisualizationLayout">
+      <item>
+       <layout class="QHBoxLayout" name="materialMeshLayout">
+        <item>
+         <widget class="QLabel" name="materialMeshLabel">
+          <property name="text">
+           <string>Volume Mesh:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="qMRMLNodeComboBox" name="materialMeshSelector">
+          <property name="nodeTypes">
+           <stringlist>
+            <string>vtkMRMLModelNode</string>
+           </stringlist>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="removeEnabled">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="materialPropertyLayout">
+        <item>
+         <widget class="QLabel" name="materialPropertyLabel">
+          <property name="text">
+           <string>Property:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="materialPropertySelector">
+          <item>
+           <property name="text">
+            <string>BMD (mg/cc)</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>BV/TV</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="materialButtonsLayout">
+        <item>
+         <widget class="QPushButton" name="visualizeMaterialButton">
+          <property name="text">
+           <string>Visualize Property</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="resetMaterialVisualizationButton">
+          <property name="text">
+           <string>Reset Visualization</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
    <item>
     <widget class="QPushButton" name="applyButton">
      <property name="toolTip">

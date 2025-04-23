@@ -47,7 +47,7 @@ Based on the mesh automation pipeline developed by the FE-Spine group.
     
     def initializeModule(self):
         # Install required Python packages
-        requiredPackages = ["meshio", "pyacvd", "tqdm", "SimpleITK", "gmsh"]
+        requiredPackages = ["meshio", "pyacvd", "tqdm", "SimpleITK", "gmsh", "pandas"]
         for package in requiredPackages:
             try:
                 __import__(package)
@@ -158,6 +158,9 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         
         # Hide clipping controls initially (new)
         self.ui.clippingControlsGroupBox.setVisible(False)
+        
+        # Add material visualization setup
+        self.setupMaterialVisualization()
         
         # Initialize parameter node
         self.initializeParameterNode()
@@ -909,6 +912,150 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         mesh.GetCellData().AddArray(metricArray)
         mesh.GetCellData().SetActiveScalars(metricArray.GetName())
         modelNode.Modified()
+
+    def setupMaterialVisualization(self):
+        """Set up material visualization controls"""
+        # Connect visualization buttons
+        self.ui.visualizeMaterialButton.connect('clicked(bool)', self.onVisualizeMaterialButtonClicked)
+        self.ui.resetMaterialVisualizationButton.connect('clicked(bool)', 
+                                                        self.onResetMaterialVisualizationButtonClicked)
+        
+        # Setup material mesh selector
+        self.ui.materialMeshSelector.nodeTypes = ["vtkMRMLModelNode"]
+        self.ui.materialMeshSelector.addEnabled = False
+        self.ui.materialMeshSelector.removeEnabled = False
+        self.ui.materialMeshSelector.noneEnabled = True
+        self.ui.materialMeshSelector.setMRMLScene(slicer.mrmlScene)
+
+    def onVisualizeMaterialButtonClicked(self):
+        """Handle visualization of material properties"""
+        modelNode = self.ui.materialMeshSelector.currentNode()
+        if not modelNode:
+            slicer.util.errorDisplay("No mesh selected for visualization.")
+            return
+        
+        # Get associated properties file
+        meshName = modelNode.GetName()
+        if "_volume_mesh" not in meshName:
+            slicer.util.errorDisplay("Please select a volume mesh for material visualization.")
+            return
+        
+        segmentName = meshName.split("_volume_mesh")[0]
+        propertiesPath = os.path.join(
+            self.ui.outputDirectorySelector.directory,
+            segmentName,
+            f"{segmentName}_element_properties.csv"
+        )
+        
+        if not os.path.exists(propertiesPath):
+            slicer.util.errorDisplay("Material properties file not found.")
+            return
+        
+        # Load and apply properties
+        import pandas as pd
+        import numpy as np
+        try:
+            df = pd.read_csv(propertiesPath)
+            propertyName = "BMD" if self.ui.materialPropertySelector.currentText == "BMD (mg/cc)" else "BV/TV"
+            
+            # Create property array
+            propertyArray = vtk.vtkDoubleArray()
+            propertyArray.SetName(propertyName)
+            propertyArray.SetNumberOfComponents(1)
+            
+            # Set values for each cell
+            mesh = modelNode.GetMesh()
+            for i in range(mesh.GetNumberOfCells()):
+                if i < len(df):
+                    value = df[propertyName][i]
+                    propertyArray.InsertNextValue(value)
+            
+            # Apply to mesh
+            mesh.GetCellData().AddArray(propertyArray)
+            mesh.GetCellData().SetActiveScalars(propertyName)
+            
+            # Update display properties
+            displayNode = modelNode.GetDisplayNode()
+            if not displayNode:
+                displayNode = slicer.vtkMRMLModelDisplayNode()
+                slicer.mrmlScene.AddNode(displayNode)
+                modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
+            
+            # Set up color mapping
+            displayNode.SetScalarVisibility(True)
+            displayNode.SetActiveScalarName(propertyName)
+            displayNode.SetAndObserveColorNodeID("vtkMRMLColorTableNodeWarm1")
+            
+            # Auto-scale color mapping
+            scalarRange = [np.min(df[propertyName]), np.max(df[propertyName])]
+            displayNode.SetScalarRange(scalarRange[0], scalarRange[1])
+            
+            # Update view
+            modelNode.Modified()
+            
+            # Show scalar bar
+            self.showScalarBar(modelNode, propertyName, scalarRange)
+            
+        except Exception as e:
+            slicer.util.errorDisplay(f"Error visualizing properties: {str(e)}")
+
+    def onResetMaterialVisualizationButtonClicked(self):
+        """Reset material visualization to default"""
+        modelNode = self.ui.materialMeshSelector.currentNode()
+        if modelNode and modelNode.GetDisplayNode():
+            displayNode = modelNode.GetDisplayNode()
+            displayNode.SetScalarVisibility(False)
+            self.removeScalarBar()
+
+    def showScalarBar(self, modelNode, propertyName, scalarRange):
+        """Show scalar bar for material property visualization"""
+        self.removeScalarBar()
+        
+        try:
+            # Create a new layout
+            layoutManager = slicer.app.layoutManager()
+            layoutManager.setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
+            
+            # Create color legend display node
+            colorLegendDisplayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLColorLegendDisplayNode")
+            
+            if not colorLegendDisplayNode:
+                return
+                
+            # Configure color legend (ignore unsupported attributes)
+            colorLegendDisplayNode.SetName(f"{propertyName}_Legend")
+            colorLegendDisplayNode.SetTitleText(propertyName)
+            colorLegendDisplayNode.SetLabelFormat("%.1f")
+            colorLegendDisplayNode.SetNumberOfLabels(5)
+            
+            # Set position and size without orientation
+            colorLegendDisplayNode.SetPosition(0.9, 0.1)
+            colorLegendDisplayNode.SetSize(0.1, 0.5)
+            
+            # Link to model's display properties
+            displayNode = modelNode.GetDisplayNode()
+            if displayNode:
+                colorLegendDisplayNode.SetAndObserveDisplayNode(displayNode)
+                displayNode.SetScalarRange(scalarRange[0], scalarRange[1])
+            
+            # Store node for cleanup
+            self.colorLegendNode = colorLegendDisplayNode
+            
+            # Show color legend
+            colorLegendDisplayNode.SetVisibility(True)
+            
+        except Exception as e:
+            # Suppress error display but log it
+            logging.debug(f"Non-critical error in showScalarBar: {str(e)}")
+
+    def removeScalarBar(self):
+        """Remove scalar bar/color legend from view"""
+        if hasattr(self, 'colorLegendNode') and self.colorLegendNode:
+            slicer.mrmlScene.RemoveNode(self.colorLegendNode)
+            self.colorLegendNode = None
+        if hasattr(self, 'chartNode') and self.chartNode:
+            slicer.mrmlScene.RemoveNode(self.chartNode)
+            self.chartNode = None
 
 #
 # SpineMeshGeneratorLogic
