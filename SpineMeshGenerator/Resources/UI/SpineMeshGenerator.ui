@@ -408,6 +408,51 @@
           </property>
         </widget>
       </item>
+      <item>
+        <widget class="QGroupBox" name="visualizationGroupBox">
+          <property name="title">
+            <string>Quality Visualization</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_6">
+            <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_4">
+                <item>
+                  <widget class="QLabel" name="label_13">
+                    <property name="text">
+                      <string>Quality Metric:</string>
+                    </property>
+                  </widget>
+                </item>
+                <item>
+                  <widget class="QComboBox" name="qualityMetricSelector">
+                    <property name="toolTip">
+                      <string>Select quality metric to visualize</string>
+                    </property>
+                  </widget>
+                </item>
+              </layout>
+            </item>
+            <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_5">
+                <item>
+                  <widget class="QPushButton" name="visualizeQualityButton">
+                    <property name="text">
+                      <string>Visualize</string>
+                    </property>
+                  </widget>
+                </item>
+                <item>
+                  <widget class="QPushButton" name="resetVisualizationButton">
+                    <property name="text">
+                      <string>Reset</string>
+                    </property>
+                  </widget>
+                </item>
+              </layout>
+            </item>
+          </layout>
+        </widget>
+      </item>
     </layout>
   </widget>
 </item>

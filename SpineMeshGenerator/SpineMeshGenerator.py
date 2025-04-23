@@ -170,6 +170,17 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAddedEvent, self.onSceneNodeAdded)
         self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeRemovedEvent, self.onSceneNodeRemoved)
 
+        # Add quality metric options
+        self.ui.qualityMetricSelector.addItem("Edge Length", "EdgeLength")
+        self.ui.qualityMetricSelector.addItem("Edge Ratio", "EdgeRatio")
+        self.ui.qualityMetricSelector.addItem("Tetrahedral Volume", "TetrahedralVolume")
+        self.ui.qualityMetricSelector.addItem("Aspect Ratio", "AspectRatio")
+        self.ui.qualityMetricSelector.addItem("Jacobian", "Jacobian")
+        
+        # Connect quality visualization buttons
+        self.ui.visualizeQualityButton.connect('clicked(bool)', self.onVisualizeQualityButtonClicked)
+        self.ui.resetVisualizationButton.connect('clicked(bool)', self.onResetVisualizationButtonClicked)
+
     def setupSegmentTable(self):
         """Set up the segment table widget."""
         self.ui.segmentsTableWidget.setColumnCount(2)
@@ -770,6 +781,134 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         
         # Show the dialog
         meshStatsDialog.exec_()
+
+    def onVisualizeQualityButtonClicked(self):
+        """Handle visualization of selected quality metric"""
+        modelNode = self.ui.qualityAnalysisMeshSelector.currentNode()
+        if not modelNode:
+            slicer.util.errorDisplay("No mesh selected for visualization.")
+            return
+            
+        metricType = self.ui.qualityMetricSelector.currentData
+        displayNode = modelNode.GetDisplayNode()
+        
+        if not displayNode:
+            modelNode.CreateDefaultDisplayNodes()
+            displayNode = modelNode.GetDisplayNode()
+        
+        # Ensure visibility is on
+        displayNode.SetVisibility(True)
+        
+        # Setup color mapping
+        colorNode = slicer.util.getNode('Warm1')
+        if not colorNode:
+            colorNode = slicer.util.getFirstNodeByClassByName('vtkMRMLColorTableNode', 'Warm1')
+        if colorNode:
+            displayNode.SetAndObserveColorNodeID(colorNode.GetID())
+        
+        # Calculate and set the appropriate metric array
+        self.calculateQualityMetric(modelNode, metricType)
+        
+        # Get the metric name based on the selected type
+        metricName = {
+            "EdgeLength": "Edge Lengths",
+            "EdgeRatio": "Edge Ratio",
+            "TetrahedralVolume": "Tetrahedral Volume",
+            "AspectRatio": "Quality",  # VTK Mesh Quality filter uses "Quality" as the array name
+            "Jacobian": "Jacobian"
+        }.get(metricType, "Quality")
+        
+        # Explicitly set the active scalar array name
+        displayNode.SetActiveScalarName(metricName)
+        
+        # Enable scalar visibility
+        displayNode.SetScalarVisibility(True)
+        
+        # Ensure 3D view is updated
+        slicer.app.layoutManager().threeDWidget(0).threeDView().resetCamera()
+
+    def onResetVisualizationButtonClicked(self):
+        """Reset visualization to default"""
+        modelNode = self.ui.qualityAnalysisMeshSelector.currentNode()
+        if modelNode and modelNode.GetDisplayNode():
+            modelNode.GetDisplayNode().SetScalarVisibility(False)
+    
+    def calculateQualityMetric(self, modelNode, metricType):
+        """Calculate and apply the selected quality metric to the mesh"""
+        import vtk
+        import numpy as np
+        
+        mesh = modelNode.GetMesh()
+        if not mesh or not mesh.IsA("vtkUnstructuredGrid"):
+            return
+            
+        # Create arrays for storing metrics
+        metricArray = vtk.vtkDoubleArray()
+        metricArray.SetNumberOfComponents(1)
+        
+        if metricType == "EdgeLength":
+            metricArray.SetName("Edge Lengths")
+            # Calculate edge lengths for each cell
+            for i in range(mesh.GetNumberOfCells()):
+                cell = mesh.GetCell(i)
+                if cell.GetCellType() == vtk.VTK_TETRA:
+                    edges = []
+                    for j in range(6):  # 6 edges in a tetrahedron
+                        edge = cell.GetEdge(j)
+                        p1 = np.array(mesh.GetPoint(edge.GetPointId(0)))
+                        p2 = np.array(mesh.GetPoint(edge.GetPointId(1)))
+                        edges.append(np.linalg.norm(p2 - p1))
+                    metricArray.InsertNextValue(np.mean(edges))
+                    
+        elif metricType == "EdgeRatio":
+            metricArray.SetName("Edge Ratio")
+            for i in range(mesh.GetNumberOfCells()):
+                cell = mesh.GetCell(i)
+                if cell.GetCellType() == vtk.VTK_TETRA:
+                    edges = []
+                    for j in range(6):
+                        edge = cell.GetEdge(j)
+                        p1 = np.array(mesh.GetPoint(edge.GetPointId(0)))
+                        p2 = np.array(mesh.GetPoint(edge.GetPointId(1)))
+                        edges.append(np.linalg.norm(p2 - p1))
+                    metricArray.InsertNextValue(max(edges) / min(edges))
+                    
+        elif metricType == "TetrahedralVolume":
+            metricArray.SetName("Tetrahedral Volume")
+            for i in range(mesh.GetNumberOfCells()):
+                cell = mesh.GetCell(i)
+                if cell.GetCellType() == vtk.VTK_TETRA:
+                    pts = [np.array(mesh.GetPoint(cell.GetPointId(j))) for j in range(4)]
+                    v1 = pts[1] - pts[0]
+                    v2 = pts[2] - pts[0]
+                    v3 = pts[3] - pts[0]
+                    volume = abs(np.dot(np.cross(v1, v2), v3)) / 6.0
+                    metricArray.InsertNextValue(volume)
+                    
+        elif metricType == "AspectRatio":
+            metricArray.SetName("Aspect Ratio")
+            qualityFilter = vtk.vtkMeshQuality()
+            qualityFilter.SetInputData(mesh)
+            qualityFilter.SetTetQualityMeasureToAspectRatio()
+            qualityFilter.Update()
+            metricArray = qualityFilter.GetOutput().GetCellData().GetArray("Quality")
+            
+        elif metricType == "Jacobian":
+            metricArray.SetName("Jacobian")
+            for i in range(mesh.GetNumberOfCells()):
+                cell = mesh.GetCell(i)
+                if cell.GetCellType() == vtk.VTK_TETRA:
+                    pts = [np.array(mesh.GetPoint(cell.GetPointId(j))) for j in range(4)]
+                    v1 = pts[1] - pts[0]
+                    v2 = pts[2] - pts[0]
+                    v3 = pts[3] - pts[0]
+                    jacobian = abs(np.linalg.det(np.column_stack((v1, v2, v3))))
+                    metricArray.InsertNextValue(jacobian)
+        
+        # Apply the metric array to the mesh
+        mesh.GetCellData().AddArray(metricArray)
+        mesh.GetCellData().SetActiveScalars(metricArray.GetName())
+        modelNode.Modified()
 
 #
 # SpineMeshGeneratorLogic
