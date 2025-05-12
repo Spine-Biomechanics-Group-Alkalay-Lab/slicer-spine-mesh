@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>452</width>
-    <height>800</height> <!-- Increased height for new controls -->
+    <height>800</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -89,141 +89,6 @@
     </widget>
    </item>
    <item>
-    <widget class="ctkCollapsibleButton" name="meshParametersCollapsibleButton">
-     <property name="text">
-      <string>Mesh Parameters</string>
-     </property>
-     <layout class="QFormLayout" name="formLayout_3">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_3">
-        <property name="text">
-         <string>Target Edge Length (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QDoubleSpinBox" name="targetEdgeLengthSpinBox">
-        <property name="toolTip">
-         <string>Specify the target edge length for the mesh elements in mm</string>
-        </property>
-        <property name="decimals">
-         <number>2</number>
-        </property>
-        <property name="minimum">
-         <double>0.1</double>
-        </property>
-        <property name="maximum">
-         <double>10.0</double>
-        </property>
-        <property name="singleStep">
-         <double>0.1</double>
-        </property>
-        <property name="value">
-         <double>1.0</double>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_4">
-        <property name="text">
-         <string>Output Format:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QComboBox" name="outputFormatComboBox">
-        <property name="toolTip">
-         <string>Select output mesh format</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="materialMappingCollapsibleButton">
-     <property name="text">
-      <string>Material Mapping</string>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_2">
-      <item>
-       <widget class="QCheckBox" name="enableMaterialMappingCheckBox">
-        <property name="text">
-         <string>Enable Material Mapping from CT</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QGroupBox" name="materialMappingGroupBox">
-        <property name="title">
-         <string>Material Mapping Parameters</string>
-        </property>
-        <layout class="QFormLayout" name="formLayout_2">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_5">
-           <property name="text">
-            <string>Slope (mg/cm³ per HU):</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QDoubleSpinBox" name="slopeSpinBox">
-           <property name="toolTip">
-            <string>Slope for HU to BMD calibration</string>
-           </property>
-           <property name="decimals">
-            <number>3</number>
-           </property>
-           <property name="minimum">
-            <double>0.001</double>
-           </property>
-           <property name="maximum">
-            <double>10.0</double>
-           </property>
-           <property name="singleStep">
-            <double>0.1</double>
-           </property>
-           <property name="value">
-            <double>0.7</double>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_6">
-           <property name="text">
-            <string>Intercept (mg/cm³):</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QDoubleSpinBox" name="interceptSpinBox">
-           <property name="toolTip">
-            <string>Intercept for HU to BMD calibration</string>
-           </property>
-           <property name="decimals">
-            <number>3</number>
-           </property>
-           <property name="minimum">
-            <double>-100.0</double>
-           </property>
-           <property name="maximum">
-            <double>100.0</double>
-           </property>
-           <property name="singleStep">
-            <double>0.1</double>
-           </property>
-           <property name="value">
-            <double>5.1</double>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <widget class="ctkCollapsibleButton" name="outputCollapsibleButton">
      <property name="text">
       <string>Output</string>
@@ -246,321 +111,711 @@
      </layout>
     </widget>
    </item>
-   <!-- Replace existing Clipping Section with this -->
    <item>
-    <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
-     <property name="text">
-      <string>Mesh Clipping</string>
+    <widget class="QTabWidget" name="workflowTabWidget">
+     <property name="currentIndex">
+      <number>0</number>
      </property>
-     <layout class="QVBoxLayout" name="verticalLayout_4">
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-        <item>
-         <widget class="QLabel" name="label_9">
-          <property name="text">
-           <string>Select Mesh:</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="qMRMLNodeComboBox" name="modelSelector">
-          <property name="toolTip">
-           <string>Select mesh to clip</string>
-          </property>
-          <property name="nodeTypes">
-           <stringlist>
-            <string>vtkMRMLModelNode</string>
-           </stringlist>
-          </property>
-          <property name="showChildNodeTypes">
-           <bool>false</bool>
-          </property>
-          <property name="noneEnabled">
-           <bool>true</bool>
-          </property>
-          <property name="addEnabled">
-           <bool>false</bool>
-          </property>
-          <property name="removeEnabled">
-           <bool>false</bool>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <widget class="QPushButton" name="enableClippingButton">
-        <property name="toolTip">
-         <string>Enable/disable mesh clipping</string>
-        </property>
-        <property name="text">
-         <string>Enable Clipping</string>
-        </property>
-        <property name="checkable">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QGroupBox" name="clippingControlsGroupBox">
-        <property name="title">
-         <string>Clipping Controls</string>
-        </property>
-        <layout class="QFormLayout" name="formLayout_5">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_red">
-           <property name="text">
-            <string>Axial (Red):</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="ctkSliderWidget" name="redSliceOffsetSlider">
-           <property name="toolTip">
-            <string>Adjust clipping in axial plane</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_yellow">
-           <property name="text">
-            <string>Sagittal (Yellow):</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="ctkSliderWidget" name="yellowSliceOffsetSlider">
-           <property name="toolTip">
-            <string>Adjust clipping in sagittal plane</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_green">
-           <property name="text">
-            <string>Coronal (Green):</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="ctkSliderWidget" name="greenSliceOffsetSlider">
-           <property name="toolTip">
-            <string>Adjust clipping in coronal plane</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <!-- End of Updated Clipping Section -->
-   <!-- New Quality Analysis Section -->
-<item>
-  <widget class="ctkCollapsibleButton" name="qualityAnalysisCollapsibleButton">
-    <property name="text">
-      <string>Mesh Quality Analysis</string>
-    </property>
-    <layout class="QVBoxLayout" name="verticalLayout_5">
-      <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_3">
-          <item>
-            <widget class="QLabel" name="label_12">
-              <property name="text">
-                <string>Select Mesh:</string>
-              </property>
-            </widget>
+     <!-- Tab 1: Mesh Generation & Quality -->
+     <widget class="QWidget" name="meshGenerationTab">
+      <attribute name="title">
+       <string>Mesh Generation</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="meshGenerationLayout">
+       <item>
+        <widget class="ctkCollapsibleButton" name="meshParametersCollapsibleButton">
+         <property name="text">
+          <string>Mesh Parameters</string>
+         </property>
+         <layout class="QFormLayout" name="formLayout_3">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_3">
+            <property name="text">
+             <string>Target Edge Length (mm):</string>
+            </property>
+           </widget>
           </item>
+          <item row="0" column="1">
+           <widget class="QDoubleSpinBox" name="targetEdgeLengthSpinBox">
+            <property name="toolTip">
+             <string>Specify the target edge length for the mesh elements in mm</string>
+            </property>
+            <property name="decimals">
+             <number>2</number>
+            </property>
+            <property name="minimum">
+             <double>0.1</double>
+            </property>
+            <property name="maximum">
+             <double>10.0</double>
+            </property>
+            <property name="singleStep">
+             <double>0.1</double>
+            </property>
+            <property name="value">
+             <double>1.0</double>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_4">
+            <property name="text">
+             <string>Output Format:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="outputFormatComboBox">
+            <property name="toolTip">
+             <string>Select output mesh format</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="ctkCollapsibleButton" name="clippingCollapsibleButton">
+         <property name="text">
+          <string>Mesh Clipping</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_4">
           <item>
-            <widget class="qMRMLNodeComboBox" name="qualityAnalysisMeshSelector">
+           <layout class="QHBoxLayout" name="horizontalLayout_2">
+            <item>
+             <widget class="QLabel" name="label_9">
+              <property name="text">
+               <string>Select Mesh:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="qMRMLNodeComboBox" name="modelSelector">
               <property name="toolTip">
-                <string>Select mesh to analyze</string>
+               <string>Select mesh to clip</string>
               </property>
               <property name="nodeTypes">
-                <stringlist>
-                  <string>vtkMRMLModelNode</string>
-                </stringlist>
+               <stringlist>
+                <string>vtkMRMLModelNode</string>
+               </stringlist>
               </property>
               <property name="showChildNodeTypes">
-                <bool>false</bool>
+               <bool>false</bool>
               </property>
               <property name="noneEnabled">
-                <bool>true</bool>
+               <bool>true</bool>
               </property>
               <property name="addEnabled">
-                <bool>false</bool>
+               <bool>false</bool>
               </property>
               <property name="removeEnabled">
-                <bool>false</bool>
+               <bool>false</bool>
               </property>
-            </widget>
+             </widget>
+            </item>
+           </layout>
           </item>
-        </layout>
-      </item>
-      <item>
-        <widget class="QPushButton" name="analyzeQualityButton">
-          <property name="toolTip">
-            <string>Analyze mesh quality</string>
-          </property>
-          <property name="text">
-            <string>Analyze Quality</string>
-          </property>
+          <item>
+           <widget class="QPushButton" name="enableClippingButton">
+            <property name="toolTip">
+             <string>Enable/disable mesh clipping</string>
+            </property>
+            <property name="text">
+             <string>Enable Clipping</string>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QGroupBox" name="clippingControlsGroupBox">
+            <property name="title">
+             <string>Clipping Controls</string>
+            </property>
+            <layout class="QFormLayout" name="formLayout_5">
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_red">
+               <property name="text">
+                <string>Axial (Red):</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="ctkSliderWidget" name="redSliceOffsetSlider">
+               <property name="toolTip">
+                <string>Adjust clipping in axial plane</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_yellow">
+               <property name="text">
+                <string>Sagittal (Yellow):</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="ctkSliderWidget" name="yellowSliceOffsetSlider">
+               <property name="toolTip">
+                <string>Adjust clipping in sagittal plane</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="label_green">
+               <property name="text">
+                <string>Coronal (Green):</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="ctkSliderWidget" name="greenSliceOffsetSlider">
+               <property name="toolTip">
+                <string>Adjust clipping in coronal plane</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
         </widget>
-      </item>
-      <item>
-        <widget class="QGroupBox" name="visualizationGroupBox">
-          <property name="title">
-            <string>Quality Visualization</string>
-          </property>
-          <layout class="QVBoxLayout" name="verticalLayout_6">
+       </item>
+       <item>
+        <widget class="ctkCollapsibleButton" name="qualityAnalysisCollapsibleButton">
+         <property name="text">
+          <string>Mesh Quality Analysis</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_5">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_3">
             <item>
+             <widget class="QLabel" name="label_12">
+              <property name="text">
+               <string>Select Mesh:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="qMRMLNodeComboBox" name="qualityAnalysisMeshSelector">
+              <property name="toolTip">
+               <string>Select mesh to analyze</string>
+              </property>
+              <property name="nodeTypes">
+               <stringlist>
+                <string>vtkMRMLModelNode</string>
+               </stringlist>
+              </property>
+              <property name="showChildNodeTypes">
+               <bool>false</bool>
+              </property>
+              <property name="noneEnabled">
+               <bool>true</bool>
+              </property>
+              <property name="addEnabled">
+               <bool>false</bool>
+              </property>
+              <property name="removeEnabled">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QPushButton" name="analyzeQualityButton">
+            <property name="toolTip">
+             <string>Analyze mesh quality</string>
+            </property>
+            <property name="text">
+             <string>Analyze Quality</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QGroupBox" name="visualizationGroupBox">
+            <property name="title">
+             <string>Quality Visualization</string>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_6">
+             <item>
               <layout class="QHBoxLayout" name="horizontalLayout_4">
-                <item>
-                  <widget class="QLabel" name="label_13">
-                    <property name="text">
-                      <string>Quality Metric:</string>
-                    </property>
-                  </widget>
-                </item>
-                <item>
-                  <widget class="QComboBox" name="qualityMetricSelector">
-                    <property name="toolTip">
-                      <string>Select quality metric to visualize</string>
-                    </property>
-                  </widget>
-                </item>
+               <item>
+                <widget class="QLabel" name="label_13">
+                 <property name="text">
+                  <string>Quality Metric:</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="qualityMetricSelector">
+                 <property name="toolTip">
+                  <string>Select quality metric to visualize</string>
+                 </property>
+                </widget>
+               </item>
               </layout>
+             </item>
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_5">
+               <item>
+                <widget class="QPushButton" name="visualizeQualityButton">
+                 <property name="text">
+                  <string>Visualize</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="showQualityHistogramButton">
+                 <property name="text">
+                  <string>Show Histogram</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="resetVisualizationButton">
+                 <property name="text">
+                  <string>Reset</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="generateMeshButton">
+         <property name="toolTip">
+          <string>Run mesh generation for selected segments</string>
+         </property>
+         <property name="text">
+          <string>Generate Mesh</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_1">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <!-- Tab 2: Material Properties -->
+     <widget class="QWidget" name="materialPropertiesTab">
+      <attribute name="title">
+       <string>Material Properties</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="materialPropertiesLayout">
+       <item>
+        <widget class="ctkCollapsibleButton" name="materialMappingCollapsibleButton">
+         <property name="text">
+          <string>Material Mapping</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_2">
+          <item>
+           <widget class="QCheckBox" name="enableMaterialMappingCheckBox">
+            <property name="text">
+             <string>Enable Material Mapping from CT</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QGroupBox" name="materialMappingGroupBox">
+            <property name="title">
+             <string>Material Mapping Parameters</string>
+            </property>
+            <layout class="QFormLayout" name="formLayout_2">
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_5">
+               <property name="text">
+                <string>Slope (mg/cm³ per HU):</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QDoubleSpinBox" name="slopeSpinBox">
+               <property name="toolTip">
+                <string>Slope for HU to BMD calibration</string>
+               </property>
+               <property name="decimals">
+                <number>3</number>
+               </property>
+               <property name="minimum">
+                <double>0.001</double>
+               </property>
+               <property name="maximum">
+                <double>10.0</double>
+               </property>
+               <property name="singleStep">
+                <double>0.1</double>
+               </property>
+               <property name="value">
+                <double>0.7</double>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_6">
+               <property name="text">
+                <string>Intercept (mg/cm³):</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QDoubleSpinBox" name="interceptSpinBox">
+               <property name="toolTip">
+                <string>Intercept for HU to BMD calibration</string>
+               </property>
+               <property name="decimals">
+                <number>3</number>
+               </property>
+               <property name="minimum">
+                <double>-100.0</double>
+               </property>
+               <property name="maximum">
+                <double>100.0</double>
+               </property>
+               <property name="singleStep">
+                <double>0.1</double>
+               </property>
+               <property name="value">
+                <double>5.1</double>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="ctkCollapsibleButton" name="materialVisualizationCollapsibleButton">
+         <property name="text">
+          <string>Material Properties Visualization</string>
+         </property>
+         <layout class="QVBoxLayout" name="materialVisualizationLayout">
+          <item>
+           <layout class="QHBoxLayout" name="materialMeshLayout">
+            <item>
+             <widget class="QLabel" name="materialMeshLabel">
+              <property name="text">
+               <string>Volume Mesh:</string>
+              </property>
+             </widget>
             </item>
             <item>
-              <layout class="QHBoxLayout" name="horizontalLayout_5">
-                <item>
-                  <widget class="QPushButton" name="visualizeQualityButton">
-                    <property name="text">
-                      <string>Visualize</string>
-                    </property>
-                  </widget>
-                </item>
-                <item>
-                  <widget class="QPushButton" name="resetVisualizationButton">
-                    <property name="text">
-                      <string>Reset</string>
-                    </property>
-                  </widget>
-                </item>
-              </layout>
+             <widget class="qMRMLNodeComboBox" name="materialMeshSelector">
+              <property name="nodeTypes">
+               <stringlist>
+                <string>vtkMRMLModelNode</string>
+               </stringlist>
+              </property>
+              <property name="noneEnabled">
+               <bool>true</bool>
+              </property>
+              <property name="addEnabled">
+               <bool>false</bool>
+              </property>
+              <property name="removeEnabled">
+               <bool>false</bool>
+              </property>
+             </widget>
             </item>
-          </layout>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="materialPropertyLayout">
+            <item>
+             <widget class="QLabel" name="materialPropertyLabel">
+              <property name="text">
+               <string>Property:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="materialPropertySelector">
+              <item>
+               <property name="text">
+                <string>BMD (mg/cc)</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>BV/TV</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="materialButtonsLayout">
+            <item>
+             <widget class="QPushButton" name="visualizeMaterialButton">
+              <property name="text">
+               <string>Visualize Property</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="showMaterialHistogramButton">
+              <property name="text">
+               <string>Show Histogram</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="resetMaterialVisualizationButton">
+              <property name="text">
+               <string>Reset Visualization</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
         </widget>
-      </item>
-    </layout>
-  </widget>
-</item>
-   <!-- End of New Clipping Section -->
-   <!-- Add before Apply Button -->
-   <item>
-    <widget class="ctkCollapsibleButton" name="materialVisualizationCollapsibleButton">
-     <property name="text">
-      <string>Material Properties Visualization</string>
-     </property>
-     <layout class="QVBoxLayout" name="materialVisualizationLayout">
-      <item>
-       <layout class="QHBoxLayout" name="materialMeshLayout">
-        <item>
-         <widget class="QLabel" name="materialMeshLabel">
-          <property name="text">
-           <string>Volume Mesh:</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="qMRMLNodeComboBox" name="materialMeshSelector">
-          <property name="nodeTypes">
-           <stringlist>
-            <string>vtkMRMLModelNode</string>
-           </stringlist>
-          </property>
-          <property name="noneEnabled">
-           <bool>true</bool>
-          </property>
-          <property name="addEnabled">
-           <bool>false</bool>
-          </property>
-          <property name="removeEnabled">
-           <bool>false</bool>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="materialPropertyLayout">
-        <item>
-         <widget class="QLabel" name="materialPropertyLabel">
-          <property name="text">
-           <string>Property:</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QComboBox" name="materialPropertySelector">
-          <item>
-           <property name="text">
-            <string>BMD (mg/cc)</string>
-           </property>
+       </item>
+       <item>
+        <widget class="QPushButton" name="applyMaterialButton">
+         <property name="toolTip">
+          <string>Apply material properties to selected meshes</string>
+         </property>
+         <property name="text">
+          <string>Calculate Material Properties</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_2">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <!-- Tab 3: Export & Conversion -->
+     <widget class="QWidget" name="exportTab">
+      <attribute name="title">
+       <string>Export</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="exportLayout">
+       <item>
+        <widget class="ctkCollapsibleButton" name="exportMeshCollapsibleButton">
+         <property name="text">
+          <string>Export Settings</string>
+         </property>
+         <layout class="QFormLayout" name="exportFormLayout">
+          <item row="0" column="0">
+           <widget class="QLabel" name="exportMeshLabel">
+            <property name="text">
+             <string>Mesh to Export:</string>
+            </property>
+           </widget>
           </item>
-          <item>
-           <property name="text">
-            <string>BV/TV</string>
-           </property>
+          <item row="0" column="1">
+           <widget class="qMRMLNodeComboBox" name="exportMeshSelector">
+            <property name="toolTip">
+             <string>Select mesh to export</string>
+            </property>
+            <property name="nodeTypes">
+             <stringlist>
+              <string>vtkMRMLModelNode</string>
+             </stringlist>
+            </property>
+            <property name="showChildNodeTypes">
+             <bool>false</bool>
+            </property>
+            <property name="noneEnabled">
+             <bool>true</bool>
+            </property>
+            <property name="addEnabled">
+             <bool>false</bool>
+            </property>
+            <property name="removeEnabled">
+             <bool>false</bool>
+            </property>
+           </widget>
           </item>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="materialButtonsLayout">
-        <item>
-         <widget class="QPushButton" name="visualizeMaterialButton">
-          <property name="text">
-           <string>Visualize Property</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="resetMaterialVisualizationButton">
-          <property name="text">
-           <string>Reset Visualization</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-     </layout>
+          <item row="1" column="0">
+           <widget class="QLabel" name="exportFormatLabel">
+            <property name="text">
+             <string>Export Format:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="exportFormatSelector">
+            <property name="toolTip">
+             <string>Select export format</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>All Formats</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>VTK</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>STL</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Abaqus INP</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>GMSH</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Summit</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="exportFileLabel">
+            <property name="text">
+             <string>Output File:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="ctkPathLineEdit" name="exportFilePath">
+            <property name="filters">
+             <set>ctkPathLineEdit::Files</set>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="ctkCollapsibleButton" name="abaqusSettingsCollapsibleButton">
+         <property name="text">
+          <string>Abaqus Settings</string>
+         </property>
+         <layout class="QFormLayout" name="abaqusFormLayout">
+          <item row="0" column="0">
+           <widget class="QLabel" name="loadValueLabel">
+            <property name="text">
+             <string>Load Value (N):</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QDoubleSpinBox" name="loadValueSpinBox">
+            <property name="toolTip">
+             <string>Load value for Abaqus simulation in Newtons</string>
+            </property>
+            <property name="minimum">
+             <double>1.0</double>
+            </property>
+            <property name="maximum">
+             <double>10000.0</double>
+            </property>
+            <property name="value">
+             <double>1000.0</double>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="ctkCollapsibleButton" name="summitSettingsCollapsibleButton">
+         <property name="text">
+          <string>Summit Settings</string>
+         </property>
+         <layout class="QFormLayout" name="summitFormLayout">
+          <item row="0" column="0" colspan="2">
+           <widget class="QCheckBox" name="includePropertiesCheckBox">
+            <property name="text">
+             <string>Include Material Properties</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="exportButton">
+         <property name="toolTip">
+          <string>Export mesh to selected format</string>
+         </property>
+         <property name="text">
+          <string>Export Mesh</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="batchExportButton">
+         <property name="toolTip">
+          <string>Export all meshes in scene to selected format</string>
+         </property>
+         <property name="text">
+          <string>Batch Export All Meshes</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_3">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
    <item>
     <widget class="QPushButton" name="applyButton">
      <property name="toolTip">
-      <string>Run mesh generation for selected segments</string>
+      <string>Run complete workflow on all tabs</string>
      </property>
      <property name="text">
-      <string>Apply</string>
+      <string>Run Complete Workflow</string>
      </property>
     </widget>
-   </item>
-   <item>
-    <spacer name="verticalSpacer">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
    </item>
   </layout>
  </widget>
@@ -575,6 +830,11 @@
    <class>ctkDirectoryButton</class>
    <extends>QWidget</extends>
    <header>ctkDirectoryButton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
   </customwidget>
   <customwidget>
    <class>ctkSliderWidget</class>

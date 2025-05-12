@@ -183,6 +183,20 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         # Connect quality visualization buttons
         self.ui.visualizeQualityButton.connect('clicked(bool)', self.onVisualizeQualityButtonClicked)
         self.ui.resetVisualizationButton.connect('clicked(bool)', self.onResetVisualizationButtonClicked)
+        self.ui.showQualityHistogramButton.connect('clicked(bool)', self.onShowQualityHistogramButtonClicked)
+
+        # Connect new tabbed workflow buttons
+        self.ui.generateMeshButton.connect("clicked(bool)", self.onGenerateMeshButton)
+        self.ui.applyMaterialButton.connect("clicked(bool)", self.onApplyMaterialButton)
+        self.ui.exportButton.connect("clicked(bool)", self.onExportButton)
+        self.ui.batchExportButton.connect("clicked(bool)", self.onBatchExportButton)
+
+        # Setup export mesh selector properties
+        self.ui.exportMeshSelector.nodeTypes = ["vtkMRMLModelNode"]
+        self.ui.exportMeshSelector.addEnabled = False
+        self.ui.exportMeshSelector.removeEnabled = False
+        self.ui.exportMeshSelector.noneEnabled = True
+        self.ui.exportMeshSelector.setMRMLScene(slicer.mrmlScene)
 
     def setupSegmentTable(self):
         """Set up the segment table widget."""
@@ -292,7 +306,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
                 row += 1
         
         # Force GUI update
-        self.updateGUIFromParameterNode()
+        # self.updateGUIFromParameterNode()  # Removed to prevent recursion
 
     def onSegmentSelectionChanged(self, segmentID, checked, segmentationNode):
         """Handle segment selection changes and update visibility"""
@@ -419,22 +433,33 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             # Update slider ranges based on model bounds
             bounds = [0] * 6
             modelNode.GetBounds(bounds)
-            
+
             # Set ranges for each slider based on model bounds
-            self.ui.redSliceOffsetSlider.minimum = bounds[4]
-            self.ui.redSliceOffsetSlider.maximum = bounds[5]  # Z range for axial
-            
-            self.ui.yellowSliceOffsetSlider.minimum = bounds[0]
-            self.ui.yellowSliceOffsetSlider.maximum = bounds[1]  # X range for sagittal
-            
-            self.ui.greenSliceOffsetSlider.minimum = bounds[2]
-            self.ui.greenSliceOffsetSlider.maximum = bounds[3]  # Y range for coronal
-            
-            # Set initial values to middle of ranges
-            self.ui.redSliceOffsetSlider.value = (bounds[4] + bounds[5]) / 2
-            self.ui.yellowSliceOffsetSlider.value = (bounds[0] + bounds[1]) / 2
-            self.ui.greenSliceOffsetSlider.value = (bounds[2] + bounds[3]) / 2
-            
+            # Always set minimum before maximum, then set value within range
+            self.ui.redSliceOffsetSlider.minimum = min(bounds[4], bounds[5])
+            self.ui.redSliceOffsetSlider.maximum = max(bounds[4], bounds[5])  # Z range for axial
+            red_mid = (self.ui.redSliceOffsetSlider.minimum + self.ui.redSliceOffsetSlider.maximum) / 2
+            self.ui.redSliceOffsetSlider.value = red_mid
+
+            self.ui.yellowSliceOffsetSlider.minimum = min(bounds[0], bounds[1])
+            self.ui.yellowSliceOffsetSlider.maximum = max(bounds[0], bounds[1])  # X range for sagittal
+            yellow_mid = (self.ui.yellowSliceOffsetSlider.minimum + self.ui.yellowSliceOffsetSlider.maximum) / 2
+            # Extend positive bound to double the distance from midpoint
+            orig_max = self.ui.yellowSliceOffsetSlider.maximum
+            orig_min = self.ui.yellowSliceOffsetSlider.minimum
+            self.ui.yellowSliceOffsetSlider.maximum = yellow_mid + (orig_max - yellow_mid) * 2
+            self.ui.yellowSliceOffsetSlider.value = yellow_mid
+
+            self.ui.greenSliceOffsetSlider.minimum = min(bounds[2], bounds[3])
+            self.ui.greenSliceOffsetSlider.maximum = max(bounds[2], bounds[3])  # Y range for coronal
+            green_mid = (self.ui.greenSliceOffsetSlider.minimum + self.ui.greenSliceOffsetSlider.maximum) / 2
+            self.ui.greenSliceOffsetSlider.value = green_mid
+
+            # Optionally set singleStep/pageStep for better UX
+            self.ui.redSliceOffsetSlider.singleStep = 0.1
+            self.ui.yellowSliceOffsetSlider.singleStep = 0.1
+            self.ui.greenSliceOffsetSlider.singleStep = 0.1
+
             # If clipping is already enabled, update it for the new model
             if self.ui.enableClippingButton.checked:
                 self.setupClipping(modelNode)
@@ -443,7 +468,6 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         """Set up clipping for the selected model"""
         if not modelNode:
             return
-            
         try:
             # Create new clip node if needed
             if not self.clippingNode:
@@ -452,35 +476,35 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
                     self.clippingNode = existingClipNode
                 else:
                     self.clippingNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLClipModelsNode")
-            
-            # Configure clipping node
+
+            # Always set 'Keep only Whole Cells' mode
             self.clippingNode.SetClipType(2)  # 2 = Keep whole cells mode
             self.clippingNode.SetRedSliceClipState(1)
             self.clippingNode.SetYellowSliceClipState(1)
             self.clippingNode.SetGreenSliceClipState(1)
-            
+
             # Update display node clipping settings
             displayNode = modelNode.GetDisplayNode()
             if not displayNode:
                 displayNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelDisplayNode")
                 modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
-            
+
             displayNode.SetClipping(1)
             displayNode.SetAndObserveClipNodeID(self.clippingNode.GetID())
-            
+
             # Initialize slice nodes
             layoutManager = slicer.app.layoutManager()
             if not layoutManager:
                 return
-                
+
             for color in ['Red', 'Yellow', 'Green']:
                 sliceWidget = layoutManager.sliceWidget(color)
                 if sliceWidget:
                     self.sliceNodes[color] = sliceWidget.mrmlSliceNode()
-            
+
             # Update initial slice positions
             self.updateSlicePositions()
-            
+
         except Exception as e:
             logging.error(f"Error setting up clipping: {str(e)}")
 
@@ -653,95 +677,144 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self._parameterNode.EndModify(wasModified)
 
     def onApplyButton(self):
-        with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
-            # Create progress dialog
-            progressDialog = slicer.util.createProgressDialog(
-                windowTitle="Generating Meshes",
-                labelText="Initializing...",
-                maximum=100,
-                parent=slicer.util.mainWindow()
-            )
-            progressDialog.minimumDuration = 0
-            progressDialog.setValue(0)
-            progressDialog.setAutoClose(True)
-            
-            try:
-                # Get parameters from UI
-                inputVolumeNode = self.ui.inputVolumeSelector.currentNode()
-                outputDirectory = self.ui.outputDirectorySelector.directory
-                targetEdgeLength = self.ui.targetEdgeLengthSpinBox.value
-                outputFormat = str(self.ui.outputFormatComboBox.itemData(self.ui.outputFormatComboBox.currentIndex))
-                enableMaterialMapping = self.ui.enableMaterialMappingCheckBox.checked
-                
-                # Get segmentation node
-                segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
-                if not segmentationNodeID:
-                    raise ValueError("No segmentation found")
-                segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
-                if not segmentationNode:
-                    raise ValueError("Segmentation node not found")
-                
-                # Build material parameters
-                materialParams = {
-                    "slope": self.ui.slopeSpinBox.value,
-                    "intercept": self.ui.interceptSpinBox.value,
-                    "bone_threshold": 400,
-                    "neighborhood_radius": 2,
-                    "resolution_level": 1
-                }
-                
-                # Get selected segments
-                selectedSegments = []
-                for segmentID, selected in self.segmentSelectionDict.items():
-                    if selected:
-                        selectedSegments.append(segmentID)
-                
-                if not selectedSegments:
-                    raise ValueError("No segments selected for processing")
-                
-                # Process segments with progress updates
-                createdNodes, meshStatistics, summary = self.logic.process(
-                    inputVolumeNode,
-                    segmentationNode,
-                    selectedSegments,
-                    outputDirectory,
-                    targetEdgeLength,
-                    outputFormat,
-                    enableMaterialMapping,
-                    materialParams,
-                    progressCallback=lambda progress, message: self.updateProgress(progressDialog, progress, message)
-                )
-                
-                # Show results dialog
-                if createdNodes and len(createdNodes) > 0:
-                    slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
-                    threeDView = slicer.app.layoutManager().threeDWidget(0).threeDView()
-                    threeDView.resetFocalPoint()
-                    
-                    # Count volume mesh nodes
-                    volumeMeshCount = sum(1 for node in createdNodes if "_volume_mesh" in node.GetName())
-                    
-                    # Show statistics dialog and status message
-                    self.showMeshStatisticsDialog(meshStatistics, summary)
-                    statusMessage = f"Processing complete. {volumeMeshCount} volume meshes with {summary['totalElements']} elements generated."
-                else:
-                    statusMessage = "Processing complete. No meshes were loaded for display."
-                
-                slicer.util.showStatusMessage(statusMessage)
-                
-            except Exception as e:
-                slicer.util.errorDisplay(f"Processing failed: {str(e)}")
-            finally:
-                progressDialog.close()
+        # Use a progress dialog for mesh generation
+        inputVolumeNode = self.ui.inputVolumeSelector.currentNode()
+        outputDirectory = self.ui.outputDirectorySelector.directory
+        targetEdgeLength = self.ui.targetEdgeLengthSpinBox.value
+        outputFormat = str(self.ui.outputFormatComboBox.itemData(self.ui.outputFormatComboBox.currentIndex))
+        enableMaterialMapping = self.ui.enableMaterialMappingCheckBox.checked
+        segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
+        if not segmentationNodeID:
+            slicer.util.errorDisplay("No segmentation found")
+            return
+        segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
+        if not segmentationNode:
+            slicer.util.errorDisplay("Segmentation node not found")
+            return
+        materialParams = {
+            "slope": self.ui.slopeSpinBox.value,
+            "intercept": self.ui.interceptSpinBox.value,
+            "bone_threshold": 400,
+            "neighborhood_radius": 2,
+            "resolution_level": 1
+        }
+        selectedSegments = [segmentID for segmentID, selected in self.segmentSelectionDict.items() if selected]
+        if not selectedSegments:
+            slicer.util.errorDisplay("No segments selected for processing")
+            return
+        progressDialog = slicer.util.createProgressDialog(
+            windowTitle="Generating Meshes",
+            labelText="Initializing...",
+            maximum=len(selectedSegments),
+            parent=slicer.util.mainWindow()
+        )
+        progressDialog.minimumDuration = 0
+        progressDialog.setValue(0)
+        progressDialog.setAutoClose(True)
+        createdNodes = []
+        meshStatistics = {}
+        try:
+            for i, segmentID in enumerate(selectedSegments):
+                progressDialog.labelText = f"Processing segment {i+1} of {len(selectedSegments)}"
+                slicer.app.processEvents()
+                try:
+                    volumeNode, surfaceNode, stats = self.logic.processSegment(
+                        inputVolumeNode,
+                        segmentationNode,
+                        segmentID,
+                        outputDirectory,
+                        targetEdgeLength,
+                        outputFormat,
+                        enableMaterialMapping,
+                        materialParams,
+                        progressCallback=None
+                    )
+                    if volumeNode:
+                        createdNodes.append(volumeNode)
+                    if surfaceNode:
+                        createdNodes.append(surfaceNode)
+                    if stats:
+                        segmentation = segmentationNode.GetSegmentation()
+                        segment = segmentation.GetSegment(segmentID)
+                        segmentName = segment.GetName()
+                        meshStatistics[segmentName] = stats
+                except Exception as e:
+                    logging.error(f"Error processing segment {segmentID}: {str(e)}")
+                    continue
+                progressDialog.setValue(i + 1)
+                if progressDialog.wasCanceled:
+                    break
+            # Create summary statistics
+            totalElements = sum(stats.get("volume_elements", 0) for stats in meshStatistics.values() if stats)
+            avgEdgeLength = np.mean([stats.get("vtk_mean_edge_length", 0) for stats in meshStatistics.values() if stats and stats.get("vtk_mean_edge_length")])
+            summary = {
+                "totalMeshes": len(meshStatistics),
+                "totalElements": totalElements,
+                "averageEdgeLength": avgEdgeLength
+            }
+            if createdNodes and len(createdNodes) > 0:
+                slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpView)
+                threeDView = slicer.app.layoutManager().threeDWidget(0).threeDView()
+                threeDView.resetFocalPoint()
+                volumeMeshCount = sum(1 for node in createdNodes if "_volume_mesh" in node.GetName())
+                self.showMeshStatisticsDialog(meshStatistics, summary)
+                statusMessage = f"Processing complete. {volumeMeshCount} volume meshes with {summary['totalElements']} elements generated."
+            else:
+                statusMessage = "Processing complete. No meshes were loaded for display."
+            slicer.util.showStatusMessage(statusMessage)
+        except Exception as e:
+            slicer.util.errorDisplay(f"Processing failed: {str(e)}")
+        finally:
+            progressDialog.close()
 
-    def updateProgress(self, progressDialog, progress, message):
-        """Update progress dialog with current progress and message."""
-        if progressDialog.wasCanceled:
-            raise ValueError("User canceled the operation")
-        progressDialog.setValue(int(progress))
-        if message:
-            progressDialog.labelText = message
-        slicer.app.processEvents()
+    def onApplyMaterialButton(self):
+        # Use a progress dialog for material property assignment
+        outputDirectory = self.ui.outputDirectorySelector.directory
+        slope = self.ui.slopeSpinBox.value
+        intercept = self.ui.interceptSpinBox.value
+        materialParams = {
+            "slope": slope,
+            "intercept": intercept,
+            "bone_threshold": 400,
+            "neighborhood_radius": 2,
+            "resolution_level": 1
+        }
+        inputVolumeNode = self.ui.inputVolumeSelector.currentNode()
+        if not inputVolumeNode:
+            slicer.util.errorDisplay("No input volume selected.")
+            return
+        # Find all volume meshes in the output directory
+        mesh_files = []
+        for root, dirs, files in os.walk(outputDirectory):
+            for file in files:
+                if file.endswith("_volume_mesh.vtk"):
+                    mesh_files.append((root, file))
+        progressDialog = slicer.util.createProgressDialog(
+            windowTitle="Calculating Material Properties",
+            labelText="Initializing...",
+            maximum=len(mesh_files),
+            parent=slicer.util.mainWindow()
+        )
+        progressDialog.minimumDuration = 0
+        progressDialog.setValue(0)
+        progressDialog.setAutoClose(True)
+        for i, (root, file) in enumerate(mesh_files):
+            mesh_path = os.path.join(root, file)
+            segmentName = file.replace("_volume_mesh.vtk", "")
+            properties_path = os.path.join(root, f"{segmentName}_element_properties.csv")
+            progressDialog.labelText = f"Processing {segmentName} ({i+1}/{len(mesh_files)})"
+            self.logic.calculateMaterialProperties(
+                mesh_path,
+                inputVolumeNode.GetID(),
+                properties_path,
+                materialParams
+            )
+            progressDialog.setValue(i + 1)
+            slicer.app.processEvents()
+            if progressDialog.wasCanceled:
+                break
+        progressDialog.close()
+        slicer.util.showStatusMessage("Material property calculation complete.")
 
     def showMeshStatisticsDialog(self, meshStatistics, summary):
         """
@@ -787,6 +860,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
 
     def onVisualizeQualityButtonClicked(self):
         """Handle visualization of selected quality metric"""
+        import vtk
         modelNode = self.ui.qualityAnalysisMeshSelector.currentNode()
         if not modelNode:
             slicer.util.errorDisplay("No mesh selected for visualization.")
@@ -823,9 +897,10 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         
         # Explicitly set the active scalar array name
         displayNode.SetActiveScalarName(metricName)
-        
-        # Enable scalar visibility
         displayNode.SetScalarVisibility(True)
+        modelNode.Modified()
+        displayNode.Modified()
+        slicer.app.processEvents()
         
         # Ensure 3D view is updated
         slicer.app.layoutManager().threeDWidget(0).threeDView().resetCamera()
@@ -919,6 +994,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.ui.visualizeMaterialButton.connect('clicked(bool)', self.onVisualizeMaterialButtonClicked)
         self.ui.resetMaterialVisualizationButton.connect('clicked(bool)', 
                                                         self.onResetMaterialVisualizationButtonClicked)
+        self.ui.showMaterialHistogramButton.connect('clicked(bool)', self.onShowMaterialHistogramButtonClicked)
         
         # Setup material mesh selector
         self.ui.materialMeshSelector.nodeTypes = ["vtkMRMLModelNode"]
@@ -929,6 +1005,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
 
     def onVisualizeMaterialButtonClicked(self):
         """Handle visualization of material properties"""
+        import vtk
         modelNode = self.ui.materialMeshSelector.currentNode()
         if not modelNode:
             slicer.util.errorDisplay("No mesh selected for visualization.")
@@ -977,7 +1054,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             # Update display properties
             displayNode = modelNode.GetDisplayNode()
             if not displayNode:
-                displayNode = slicer.vtkMRMLModelDisplayNode()
+                displayNode = vtk.vtkMRMLModelDisplayNode()
                 slicer.mrmlScene.AddNode(displayNode)
                 modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
             
@@ -992,6 +1069,8 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             
             # Update view
             modelNode.Modified()
+            displayNode.Modified()
+            slicer.app.processEvents()
             
             # Show scalar bar
             self.showScalarBar(modelNode, propertyName, scalarRange)
@@ -1056,6 +1135,187 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         if hasattr(self, 'chartNode') and self.chartNode:
             slicer.mrmlScene.RemoveNode(self.chartNode)
             self.chartNode = None
+
+    def onGenerateMeshButton(self):
+        """Run mesh generation for selected segments only (no material mapping, no export)"""
+        with slicer.util.tryWithErrorDisplay("Failed to generate mesh.", waitCursor=True):
+            inputVolumeNode = self.ui.inputVolumeSelector.currentNode()
+            outputDirectory = self.ui.outputDirectorySelector.directory
+            targetEdgeLength = self.ui.targetEdgeLengthSpinBox.value
+            outputFormat = str(self.ui.outputFormatComboBox.itemData(self.ui.outputFormatComboBox.currentIndex))
+            segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
+            if not segmentationNodeID:
+                slicer.util.errorDisplay("No segmentation found")
+                return
+            segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
+            if not segmentationNode:
+                slicer.util.errorDisplay("Segmentation node not found")
+                return
+            selectedSegments = [segmentID for segmentID, selected in self.segmentSelectionDict.items() if selected]
+            if not selectedSegments:
+                slicer.util.errorDisplay("No segments selected for processing")
+                return
+            # Only mesh generation, no material mapping
+            createdNodes, meshStatistics, summary = self.logic.process(
+                inputVolumeNode,
+                segmentationNode,
+                selectedSegments,
+                outputDirectory,
+                targetEdgeLength,
+                outputFormat,
+                False,  # material mapping off
+                {},
+                progressCallback=None
+            )
+            self.showMeshStatisticsDialog(meshStatistics, summary)
+            slicer.util.showStatusMessage("Mesh generation complete.")
+
+    def onExportButton(self):
+        """Export the selected mesh to the selected format."""
+        meshNode = self.ui.exportMeshSelector.currentNode()
+        if not meshNode:
+            slicer.util.errorDisplay("No mesh selected for export.")
+            return
+        exportFormat = self.ui.exportFormatSelector.currentText
+        outputPath = self.ui.exportFilePath.currentPath
+        outputDirectory = os.path.dirname(outputPath)
+        meshName = meshNode.GetName()
+        # Find the corresponding mesh file in the output directory
+        segmentName = meshName.split("_volume_mesh")[0] if "_volume_mesh" in meshName else meshName.split("_surface_mesh")[0]
+        segmentDir = os.path.join(outputDirectory, segmentName)
+        # Map export format to file
+        formatMap = {
+            "VTK": f"{segmentName}_volume_mesh.vtk",
+            "STL": f"{segmentName}_surface_mesh.stl",
+            "Abaqus INP": f"{segmentName}_volume_mesh.inp",
+            "GMSH": f"{segmentName}_surface_mesh.msh",
+            "Summit": f"{segmentName}_mesh.summit"
+        }
+        if exportFormat in formatMap:
+            src = os.path.join(segmentDir, formatMap[exportFormat])
+            if not os.path.exists(src):
+                slicer.util.errorDisplay(f"Export file not found: {src}")
+                return
+            shutil.copy(src, outputPath)
+            slicer.util.showStatusMessage(f"Exported {exportFormat} to {outputPath}")
+        elif exportFormat == "All Formats":
+            for fmt, fname in formatMap.items():
+                src = os.path.join(segmentDir, fname)
+                if os.path.exists(src):
+                    dst = os.path.join(outputDirectory, fname)
+                    shutil.copy(src, dst)
+            slicer.util.showStatusMessage(f"Exported all formats to {outputDirectory}")
+        else:
+            slicer.util.errorDisplay(f"Unknown export format: {exportFormat}")
+
+    def onBatchExportButton(self):
+        """Export all meshes in the output directory to the selected format."""
+        exportFormat = self.ui.exportFormatSelector.currentText
+        outputDirectory = self.ui.exportFilePath.currentPath
+        # For each segment directory, export the file
+        for segmentName in os.listdir(outputDirectory):
+            segmentDir = os.path.join(outputDirectory, segmentName)
+            if not os.path.isdir(segmentDir):
+                continue
+            formatMap = {
+                "VTK": f"{segmentName}_volume_mesh.vtk",
+                "STL": f"{segmentName}_surface_mesh.stl",
+                "Abaqus INP": f"{segmentName}_volume_mesh.inp",
+                "GMSH": f"{segmentName}_surface_mesh.msh",
+                "Summit": f"{segmentName}_mesh.summit"
+            }
+            if exportFormat in formatMap:
+                src = os.path.join(segmentDir, formatMap[exportFormat])
+                if os.path.exists(src):
+                    dst = os.path.join(outputDirectory, formatMap[exportFormat])
+                    shutil.copy(src, dst)
+            elif exportFormat == "All Formats":
+                for fmt, fname in formatMap.items():
+                    src = os.path.join(segmentDir, fname)
+                    if os.path.exists(src):
+                        dst = os.path.join(outputDirectory, fname)
+                        shutil.copy(src, dst)
+        slicer.util.showStatusMessage(f"Batch export complete to {outputDirectory}")
+
+    def onShowQualityHistogramButtonClicked(self):
+        """Show histogram of the currently visualized quality metric."""
+        modelNode = self.ui.qualityAnalysisMeshSelector.currentNode()
+        if not modelNode:
+            slicer.util.errorDisplay("No mesh selected for histogram.")
+            return
+        displayNode = modelNode.GetDisplayNode()
+        if not displayNode:
+            slicer.util.errorDisplay("No display node for selected mesh.")
+            return
+        scalarName = displayNode.GetActiveScalarName()
+        if not scalarName:
+            slicer.util.errorDisplay("No active scalar for selected mesh.")
+            return
+        self.showHistogramForModel(modelNode, scalarName, f"Histogram: {scalarName}")
+
+    def onShowMaterialHistogramButtonClicked(self):
+        """Show histogram of the currently visualized material property."""
+        modelNode = self.ui.materialMeshSelector.currentNode()
+        if not modelNode:
+            slicer.util.errorDisplay("No mesh selected for histogram.")
+            return
+        displayNode = modelNode.GetDisplayNode()
+        if not displayNode:
+            slicer.util.errorDisplay("No display node for selected mesh.")
+            return
+        scalarName = displayNode.GetActiveScalarName()
+        if not scalarName:
+            slicer.util.errorDisplay("No active scalar for selected mesh.")
+            return
+        self.showHistogramForModel(modelNode, scalarName, f"Histogram: {scalarName}")
+
+    def showHistogramForModel(self, modelNode, scalarName, title="Histogram"):
+        import numpy as np
+        mesh = modelNode.GetMesh()
+        if not mesh:
+            slicer.util.errorDisplay("No mesh found for histogram.")
+            return
+        array = mesh.GetCellData().GetArray(scalarName)
+        if not array:
+            slicer.util.errorDisplay(f"No scalar array named '{scalarName}' found.")
+            return
+        values = np.array([array.GetValue(i) for i in range(array.GetNumberOfTuples())])
+        if len(values) == 0:
+            slicer.util.errorDisplay("No values found for histogram.")
+            return
+
+        # Compute histogram
+        counts, bin_edges = np.histogram(values, bins=50)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        # Create table for Slicer plot
+        tableNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode", f"{title} Table")
+        import vtk
+        arrX = vtk.vtkDoubleArray()
+        arrX.SetName(scalarName)
+        arrY = vtk.vtkDoubleArray()
+        arrY.SetName("Count")
+        for x, y in zip(bin_centers, counts):
+            arrX.InsertNextValue(x)
+            arrY.InsertNextValue(y)
+        tableNode.AddColumn(arrX)
+        tableNode.AddColumn(arrY)
+
+        # Create plot
+        plotSeriesNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotSeriesNode", f"{title} Series")
+        plotSeriesNode.SetAndObserveTableNodeID(tableNode.GetID())
+        plotSeriesNode.SetXColumnName(scalarName)
+        plotSeriesNode.SetYColumnName("Count")
+        plotSeriesNode.SetPlotType(slicer.vtkMRMLPlotSeriesNode.PlotTypeBar)
+        plotSeriesNode.SetMarkerStyle(slicer.vtkMRMLPlotSeriesNode.MarkerStyleNone)
+
+        plotChartNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLPlotChartNode", f"{title} Chart")
+        plotChartNode.AddAndObservePlotSeriesNodeID(plotSeriesNode.GetID())
+        plotChartNode.SetTitle(title)
+        plotChartNode.SetXAxisTitle(scalarName)
+        plotChartNode.SetYAxisTitle("Count")
+
+        slicer.modules.plots.logic().ShowChartInLayout(plotChartNode)
 
 #
 # SpineMeshGeneratorLogic
