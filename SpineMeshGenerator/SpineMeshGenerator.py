@@ -538,38 +538,119 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
 
     def cleanup(self):
         """Clean up observers and restore original visibility states"""
-        # Restore original visibility states
-        for segmentID, originalState in self._segmentVisibilityStates.items():
-            segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
-            if segmentationNodeID:
-                segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
-                if segmentationNode and segmentationNode.GetDisplayNode():
-                    segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, originalState)
-        
-        self._segmentVisibilityStates.clear()
-        self.removeObservers()
-        
-        # Call original cleanup
-        ScriptedLoadableModuleWidget.cleanup(self)
+        try:
+            # Restore original visibility states
+            for segmentID, originalState in self._segmentVisibilityStates.items():
+                segmentationNodeID = self._parameterNode.GetNodeReferenceID("CurrentSegmentation")
+                if segmentationNodeID:
+                    segmentationNode = slicer.mrmlScene.GetNodeByID(segmentationNodeID)
+                    if segmentationNode and segmentationNode.GetDisplayNode():
+                        segmentationNode.GetDisplayNode().SetSegmentVisibility(segmentID, originalState)
+            
+            self._segmentVisibilityStates.clear()
+            
+            # Remove all observers
+            self.removeObservers()
+            
+            # Clean up clipping
+            if self.clippingNode:
+                slicer.mrmlScene.RemoveNode(self.clippingNode)
+                self.clippingNode = None
+            
+            # Clean up slice nodes
+            for sliceNode in self.sliceNodes.values():
+                if sliceNode:
+                    slicer.mrmlScene.RemoveNode(sliceNode)
+            self.sliceNodes.clear()
+            
+            # Clean up parameter node
+            if self._parameterNode:
+                self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+                self._parameterNode = None
+            
+            # Clean up logic
+            if self.logic:
+                self.logic = None
+            
+            # Call original cleanup
+            ScriptedLoadableModuleWidget.cleanup(self)
+            
+        except Exception as e:
+            logging.error(f"Error during cleanup: {str(e)}")
+            # Continue with cleanup even if there's an error
+            ScriptedLoadableModuleWidget.cleanup(self)
 
     def enter(self):
         self.initializeParameterNode()
         self.updateSegmentTable()
 
     def exit(self):
-        # Safely remove observer from the parameter node to suppress warnings.
-        if self._parameterNode is not None:
-            try:
-                self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
-            except Exception:
-                pass
+        """Called when the module is exited."""
+        try:
+            # Safely remove observer from the parameter node
+            if self._parameterNode is not None:
+                try:
+                    self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+                except Exception:
+                    pass
+                self._parameterNode = None
+                
+            # Clean up any remaining observers
+            self.removeObservers()
+            
+            # Clean up clipping
+            if self.clippingNode:
+                slicer.mrmlScene.RemoveNode(self.clippingNode)
+                self.clippingNode = None
+            
+            # Clean up slice nodes
+            for sliceNode in self.sliceNodes.values():
+                if sliceNode:
+                    slicer.mrmlScene.RemoveNode(sliceNode)
+            self.sliceNodes.clear()
+            
+            # Clear segment visibility states
+            self._segmentVisibilityStates.clear()
+            
+            # Clear logic
+            if self.logic:
+                self.logic = None
+                
+        except Exception as e:
+            logging.error(f"Error during exit: {str(e)}")
+            # Continue with cleanup even if there's an error
+            pass
 
     def onSceneStartClose(self, caller, event):
-        self.setParameterNode(None)
+        """Called when the scene is about to close."""
+        try:
+            # Clean up parameter node
+            self.setParameterNode(None)
+            
+            # Clean up clipping
+            if self.clippingNode:
+                slicer.mrmlScene.RemoveNode(self.clippingNode)
+                self.clippingNode = None
+            
+            # Clean up slice nodes
+            for sliceNode in self.sliceNodes.values():
+                if sliceNode:
+                    slicer.mrmlScene.RemoveNode(sliceNode)
+            self.sliceNodes.clear()
+            
+            # Clear segment visibility states
+            self._segmentVisibilityStates.clear()
+            
+        except Exception as e:
+            logging.error(f"Error during scene start close: {str(e)}")
 
     def onSceneEndClose(self, caller, event):
-        if self.parent.isEntered:
-            self.initializeParameterNode()
+        """Called when the scene has finished closing."""
+        try:
+            if self.parent.isEntered:
+                self.initializeParameterNode()
+        except Exception as e:
+            logging.error(f"Error during scene end close: {str(e)}")
 
     def initializeParameterNode(self):
         if not self.logic:
@@ -2306,11 +2387,12 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         Generate volume mesh using GMSH.
         Aligned with desired workflow's generate_mesh function.
         """
-        temp_dir = tempfile.mkdtemp()
-        stl_temp = os.path.join(temp_dir, "remesh_output.stl")
-        msh_temp = os.path.join(temp_dir, "volume_mesh.msh")
-        
+        temp_dir = None
         try:
+            temp_dir = tempfile.mkdtemp()
+            stl_temp = os.path.join(temp_dir, "remesh_output.stl")
+            msh_temp = os.path.join(temp_dir, "volume_mesh.msh")
+            
             # Save the STL for mesh generation
             slicer.util.saveNode(outputModelNode, stl_temp)
             logging.error(f"Saved temporary STL for GMSH: {stl_temp}")
@@ -2354,7 +2436,12 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             logging.error(f"Error generating volume mesh: {str(e)}")
             raise
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            # Clean up temporary directory
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception as e:
+                    logging.error(f"Error cleaning up temporary directory: {str(e)}")
 
     def convertAndSaveMesh(self, input_filepath, paths):
         """
