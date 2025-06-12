@@ -69,6 +69,7 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
         self.logic = None
         self._parameterNode = None
         self._updatingGUIFromParameterNode = False
+        self._updatingSegmentTable = False  # Add flag to prevent recursion
         self.segmentSelectionDict = {}  # Store segment selection info
         self.clippingEnabled = False
         self.clippingNode = None
@@ -252,61 +253,65 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
 
     def updateSegmentTable(self):
         """Update the segment table with current segments from segmentation module."""
-        if self._parameterNode is None:
-            self.initializeParameterNode()
-            if self._parameterNode is None:
-                logging.error("Failed to initialize parameter node")
-                return
-
-        # Find all segmentation nodes in the scene
-        segmentationNodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
-        
-        # Clear existing table
-        self.ui.segmentsTableWidget.setRowCount(0)
-        
-        # Update current segmentation reference in parameter node if needed
-        if segmentationNodes and not self._parameterNode.GetNodeReferenceID("CurrentSegmentation"):
-            self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNodes[0].GetID())
-        
-        row = 0
-        for segmentationNode in segmentationNodes:
-            if not segmentationNode.GetDisplayNode():
-                segmentationNode.CreateDefaultDisplayNodes()
-                
-            # If this is the first segmentation node and no current segmentation is set
-            if row == 0 and not self._parameterNode.GetNodeReferenceID("CurrentSegmentation"):
-                self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNode.GetID())
-                
-            segmentation = segmentationNode.GetSegmentation()
+        if self._updatingSegmentTable:  # Prevent recursion
+            return
             
-            # Add all segments from this segmentation
-            for segmentIndex in range(segmentation.GetNumberOfSegments()):
-                segmentID = segmentation.GetNthSegmentID(segmentIndex)
-                segment = segmentation.GetSegment(segmentID)
-                segmentName = segment.GetName()
+        self._updatingSegmentTable = True
+        try:
+            if self._parameterNode is None:
+                self.initializeParameterNode()
+                if self._parameterNode is None:
+                    logging.error("Failed to initialize parameter node")
+                    return
+
+            # Find all segmentation nodes in the scene
+            segmentationNodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
+            
+            # Clear existing table
+            self.ui.segmentsTableWidget.setRowCount(0)
+            
+            # Update current segmentation reference in parameter node if needed
+            if segmentationNodes and not self._parameterNode.GetNodeReferenceID("CurrentSegmentation"):
+                self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNodes[0].GetID())
+            
+            row = 0
+            for segmentationNode in segmentationNodes:
+                if not segmentationNode.GetDisplayNode():
+                    segmentationNode.CreateDefaultDisplayNodes()
+                    
+                # If this is the first segmentation node and no current segmentation is set
+                if row == 0 and not self._parameterNode.GetNodeReferenceID("CurrentSegmentation"):
+                    self._parameterNode.SetNodeReferenceID("CurrentSegmentation", segmentationNode.GetID())
+                    
+                segmentation = segmentationNode.GetSegmentation()
                 
-                self.ui.segmentsTableWidget.insertRow(row)
-                
-                # Create segment name item
-                nameItem = qt.QTableWidgetItem(f"{segmentationNode.GetName()}: {segmentName}")
-                self.ui.segmentsTableWidget.setItem(row, 0, nameItem)
-                
-                # Create checkbox
-                checkBox = qt.QCheckBox()
-                checkBox.checked = self.segmentSelectionDict.get(segmentID, False)
-                checkBox.connect("toggled(bool)", 
-                    lambda checked, sID=segmentID, node=segmentationNode: 
-                    self.onSegmentSelectionChanged(sID, checked, node))
-                
-                self.ui.segmentsTableWidget.setCellWidget(row, 1, checkBox)
-                
-                # Update visibility based on current selection
-                self.updateSegmentVisibility(segmentID, checkBox.checked, segmentationNode)
-                
-                row += 1
-        
-        # Force GUI update
-        # self.updateGUIFromParameterNode()  # Removed to prevent recursion
+                # Add all segments from this segmentation
+                for segmentIndex in range(segmentation.GetNumberOfSegments()):
+                    segmentID = segmentation.GetNthSegmentID(segmentIndex)
+                    segment = segmentation.GetSegment(segmentID)
+                    segmentName = segment.GetName()
+                    
+                    self.ui.segmentsTableWidget.insertRow(row)
+                    
+                    # Create segment name item
+                    nameItem = qt.QTableWidgetItem(f"{segmentationNode.GetName()}: {segmentName}")
+                    self.ui.segmentsTableWidget.setItem(row, 0, nameItem)
+                    
+                    # Create checkbox
+                    checkBox = qt.QCheckBox()
+                    checkBox.checked = self.segmentSelectionDict.get(segmentID, False)
+                    checkBox.connect("toggled(bool)", 
+                        lambda checked, sID=segmentID, node=segmentationNode: 
+                        self.onSegmentSelectionChanged(sID, checked, node))
+                    
+                    self.ui.segmentsTableWidget.setCellWidget(row, 1, checkBox)
+                    
+                    # Update visibility based on current selection
+                    self.updateSegmentVisibility(segmentID, checkBox.checked, segmentationNode)
+                    
+                    row += 1
+        finally:
+            self._updatingSegmentTable = False
 
     def onSegmentSelectionChanged(self, segmentID, checked, segmentationNode):
         """Handle segment selection changes and update visibility"""
@@ -337,11 +342,16 @@ class SpineMeshGeneratorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin
             
             # Check subject hierarchy visibility
             shNode = slicer.vtkMRMLSubjectHierarchyNode.GetSubjectHierarchyNode(slicer.mrmlScene)
+            if not shNode:
+                return
+                
             segmentationShItemID = shNode.GetItemByDataNode(segmentationNode)
-            
+            if segmentationShItemID is None:
+                return
+                
             # Make all parents visible
             parentItemID = shNode.GetItemParent(segmentationShItemID)
-            while parentItemID != shNode.GetSceneItemID():
+            while parentItemID and parentItemID != shNode.GetSceneItemID():
                 shNode.SetDisplayVisibilityForBranch(parentItemID, True)
                 parentItemID = shNode.GetItemParent(parentItemID)
 
@@ -2448,6 +2458,8 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
         Convert GMSH mesh to other formats and save them.
         """
         import meshio
+        import numpy as np
+        import vtk
         
         try:
             # Read the input mesh
@@ -2456,6 +2468,10 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             
             if not mesh or not hasattr(mesh, 'points'):
                 raise ValueError("Invalid mesh data read from file")
+            
+            # Ensure points are 3D by adding z=0 if needed
+            if mesh.points.shape[1] == 2:
+                mesh.points = np.column_stack([mesh.points, np.zeros(len(mesh.points))])
             
             # Log initial mesh statistics
             initial_elements = sum(len(c.data) for c in mesh.cells)
@@ -2478,10 +2494,34 @@ class SpineMeshGeneratorLogic(ScriptedLoadableModuleLogic):
             if tetra_count < 100:  # Arbitrary minimum - adjust as needed
                 raise ValueError(f"Too few tetrahedral elements ({tetra_count})")
             
-            # Save in different formats
-            logging.error(f"Saving VTK to: {paths['volume_mesh_path']}")
-            meshio.write(paths["volume_mesh_path"], volume_mesh, file_format="vtk")
+            # Create VTK unstructured grid
+            vtk_grid = vtk.vtkUnstructuredGrid()
             
+            # Add points
+            points = vtk.vtkPoints()
+            points.SetDataTypeToDouble()
+            points.SetNumberOfPoints(len(volume_mesh.points))
+            for i, point in enumerate(volume_mesh.points):
+                points.SetPoint(i, point)
+            vtk_grid.SetPoints(points)
+            
+            # Add cells
+            for cell_block in volume_mesh.cells:
+                if cell_block.type == "tetra":
+                    for cell in cell_block.data:
+                        vtk_cell = vtk.vtkTetra()
+                        for j, point_id in enumerate(cell):
+                            vtk_cell.GetPointIds().SetId(j, point_id)
+                        vtk_grid.InsertNextCell(vtk_cell.GetCellType(), vtk_cell.GetPointIds())
+            
+            # Write VTK file
+            writer = vtk.vtkUnstructuredGridWriter()
+            writer.SetFileName(paths["volume_mesh_path"])
+            writer.SetInputData(vtk_grid)
+            writer.SetFileTypeToBinary()
+            writer.Write()
+            
+            # Save Abaqus INP using meshio
             logging.error(f"Saving Abaqus INP to: {paths['volume_mesh_abaqus_path']}")
             meshio.write(paths["volume_mesh_abaqus_path"], volume_mesh, file_format="abaqus")
             
