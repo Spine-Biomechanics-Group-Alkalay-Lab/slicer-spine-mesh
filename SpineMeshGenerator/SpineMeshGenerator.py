@@ -32,18 +32,23 @@ class SpineMeshGenerator(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = _("Spine Mesh Generator")
-        self.parent.categories = ["FE-Spine"]
-        self.parent.dependencies = ["SegmentStatistics", "SurfaceToolbox"]
-        self.parent.contributors = ["Your Name (Your Institution)"]
+        self.parent.categories = ["Spine"]
+        self.parent.dependencies = []
+        self.parent.contributors = ["Your Name"]
         self.parent.helpText = _("""
-This module automates the process of creating uniform meshes from CT scans and segmentations for finite element analysis.
-It supports segment selection, target edge length specification, and material mapping.
-""")
+        This module generates high-quality meshes for spine models.
+        """)
         self.parent.acknowledgementText = _("""
-Based on the mesh automation pipeline developed by the FE-Spine group.
-""")
-        # Additional initialization
-        slicer.app.connect("startupCompleted()", self.initializeModule)
+        This work was supported by...
+        """)
+        
+        # Initialize setup helper
+        try:
+            import setup_helper
+            if not setup_helper.verify_setup():
+                logging.error("Failed to initialize SpineMeshGenerator setup")
+        except Exception as e:
+            logging.error(f"Error during setup: {str(e)}")
     
     def initializeModule(self):
         # Install required Python packages
